@@ -1,0 +1,4 @@
+﻿# Put each Gemini API key on new line. Bot will rotate when quota exceeded
+# Example:
+# AIzaSy...key1
+# AIzaSy...key2
