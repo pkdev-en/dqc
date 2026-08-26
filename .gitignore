@@ -12,3 +12,4 @@ serviceAccount.json
 *.log
 .git.bak
 casio-c/
+CasioEmuMsvc/
