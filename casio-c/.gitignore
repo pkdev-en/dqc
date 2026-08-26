@@ -1,5 +1,0 @@
-/target
-*.asm
-*.bin
-__pycache__/
-

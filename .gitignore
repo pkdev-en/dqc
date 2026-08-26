@@ -11,3 +11,4 @@ api_key_index.txt
 serviceAccount.json
 *.log
 .git.bak
+casio-c/
