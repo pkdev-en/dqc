@@ -1,0 +1,13 @@
+﻿__pycache__/
+*.pyc
+*.pyo
+*.webp
+*.png
+*.b64.txt
+*.pdf
+.env
+api_keys.txt
+api_key_index.txt
+serviceAccount.json
+*.log
+.git.bak

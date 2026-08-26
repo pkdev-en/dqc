@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Đạo Quán Casio | Assembly & ROP</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&family=Oswald:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js"></script>
+<style>
+:root{--bg:#f5f5f5;--surface:#fff;--surface2:#eee;--border:#ddd;--text:#111;--text2:#888;--accent:#000;--font:'JetBrains Mono',monospace;--mono:'JetBrains Mono',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--text);overflow-x:hidden}
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* SPLASH */
+#splash{position:fixed;inset:0;z-index:100000;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--surface);cursor:pointer;transition:opacity .6s,visibility .6s}
+#splash.hide{opacity:0;visibility:hidden;pointer-events:none}
+.splash-logo{width:160px;height:160px}
+.splash-logo img{width:100%;height:100%;object-fit:contain;opacity:.7;transition:opacity .3s}
+#splash:hover .splash-logo img{opacity:1}
+.splash-text{font-family:var(--font);font-size:.5rem;letter-spacing:.2em;color:var(--text2);margin-top:20px}
+.splash-text span{animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+/* WATERMARK */
+.logo-watermark{position:fixed;bottom:20px;left:24px;z-index:95;display:flex;align-items:center;gap:12px;text-decoration:none;opacity:0;animation:fadeIn 1s .8s forwards}
+.logo-watermark img{width:90px;height:90px;object-fit:contain}
+.logo-watermark span{font-family:'Oswald',sans-serif;font-size:.85rem;letter-spacing:4px;color:var(--text2)}
+@keyframes fadeIn{to{opacity:1}}
+body.page-welcome .logo-watermark{display:none}
+body.page-chat #main{height:100vh;overflow:hidden}
+
+/* NAV - hover reveal from 6px strip */
+nav{position:fixed;top:0;left:0;right:0;z-index:1001;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;gap:2px;padding:0 16px;height:44px;box-shadow:0 2px 12px rgba(0,0,0,.04)}
+nav a{padding:8px 16px;font-size:.5rem;letter-spacing:.15em;text-decoration:none;color:var(--text2);transition:all .2s;text-transform:uppercase;font-family:var(--font);border-radius:4px}
+nav a:hover,nav a.active{color:var(--accent);background:var(--surface2)}
+
+/* MAIN */
+#main{padding-top:0}
+.page{display:none;min-height:100vh}
+.page.active{display:flex;flex-direction:column;animation:slideIn .35s ease-out}
+.page.leaving{display:flex;flex-direction:column;animation:slideOut .25s ease-in forwards;pointer-events:none}
+@keyframes slideIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+@keyframes slideOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(-20px)}}
+
+/* WELCOME */
+#page-welcome{padding:0;background:var(--surface);justify-content:flex-end;align-items:flex-start}
+.welcome-wrap{display:flex;align-items:flex-end;gap:48px;padding:4rem;max-width:960px;opacity:0;transform:translateY(16px);animation:welIn .7s .5s forwards}
+@keyframes welIn{to{opacity:1;transform:translateY(0)}}
+.welcome-logo{width:280px;height:280px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:transform .3s}
+.welcome-logo img{width:100%;height:100%;object-fit:contain}
+.welcome-logo:hover{transform:scale(1.03)}
+.welcome-content{display:flex;flex-direction:column;gap:10px;max-width:450px}
+.welcome-content h1{font-family:'Oswald',sans-serif;font-size:3.6rem;letter-spacing:6px;color:var(--accent);text-transform:uppercase;line-height:1}
+.welcome-tag{font-size:.5rem;letter-spacing:.25em;color:var(--text2);opacity:.6}
+.welcome-typer{font-size:.65rem;color:var(--text2);min-height:1.2em;line-height:1.5;word-break:break-word}
+.welcome-typer span{color:var(--accent);font-weight:700}
+.cur-blink{font-weight:700;color:var(--accent);animation:blink 1s step-end infinite}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+.welcome-socials{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.welcome-socials a{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid var(--border);border-radius:4px;text-decoration:none;color:var(--text2);font-size:.45rem;transition:all .2s}
+.welcome-socials a:hover{color:var(--accent);border-color:var(--text2);background:var(--bg)}
+.welcome-actions{display:flex;gap:6px;flex-wrap:wrap}
+.welcome-actions a{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:4px;font-size:.45rem;letter-spacing:.08em;text-decoration:none;transition:all .2s;font-family:var(--font)}
+.btn-primary{background:var(--accent);color:var(--surface);border:none}
+.btn-primary:hover{opacity:.85}
+.btn-outline{border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{background:var(--surface2);border-color:var(--text2)}
+
+/* CHAT */
+#page-chat{padding:0;background:var(--surface);height:100vh;overflow:hidden}
+.chat-layout{display:flex;flex:1;height:100vh;padding-top:44px}
+.chat-sidebar{width:220px;background:var(--bg);border-right:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+.chat-sidebar h3{font-family:'Oswald',sans-serif;font-size:.65rem;letter-spacing:2px;color:var(--text2);margin-bottom:4px}
+.chat-sidebar .ch-info{font-size:.5rem;color:var(--text2);line-height:1.6;opacity:.6}
+.chat-sidebar .ch-status{font-size:.45rem;display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:4px;background:var(--surface);border:1px solid var(--border)}
+.chat-sidebar .ch-status i{font-size:.5rem}
+.chat-main{flex:1;display:flex;flex-direction:column;min-width:0}
+.chat-header{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.chat-header h2{font-size:.6rem;font-weight:700;letter-spacing:.12em;color:var(--text2)}
+.chat-header .ch-right{display:flex;gap:8px;align-items:center}
+.chat-header .ch-user{font-size:.5rem;color:var(--text2);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-header .ch-btn{background:var(--accent);color:var(--surface);border:none;padding:4px 10px;font-family:var(--font);font-size:.45rem;cursor:pointer;border-radius:3px;transition:opacity .2s}
+.chat-header .ch-btn:hover{opacity:.8}
+.chat-msgs{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:4px;background:var(--bg)}
+.msg{display:flex;gap:8px;padding:6px 8px;border-radius:4px;transition:background .15s;align-items:flex-start}
+.msg:hover{background:rgba(0,0,0,.02)}
+.msg-avatar{width:26px;height:26px;border-radius:50%;flex-shrink:0;background:var(--border);object-fit:cover}
+.msg-body{flex:1;min-width:0}
+.msg-head{display:flex;gap:8px;align-items:baseline;margin-bottom:1px}
+.msg-author{font-size:.55rem;font-weight:700;color:var(--text)}
+.msg-time{font-size:.4rem;color:var(--text2);opacity:.4}
+.msg-source{font-size:.38rem;padding:1px 4px;border-radius:2px;background:var(--border);color:var(--text2)}
+.msg-text{font-size:.55rem;line-height:1.5;color:var(--text);opacity:.8;word-break:break-word;white-space:pre-wrap}
+.chat-input-area{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);flex-shrink:0;background:var(--surface)}
+.chat-input-area input{flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 12px;font-family:var(--font);font-size:.6rem;border-radius:4px;outline:none}
+.chat-input-area input:focus{border-color:var(--text2)}
+.chat-input-area input:disabled{opacity:.3}
+.chat-input-area input::placeholder{color:var(--text2);opacity:.4}
+.chat-input-area button{background:var(--accent);color:var(--surface);border:none;padding:7px 16px;font-family:var(--font);font-size:.55rem;font-weight:700;cursor:pointer;border-radius:4px;transition:opacity .2s}
+.chat-input-area button:hover{opacity:.85}
+.chat-input-area button:disabled{opacity:.3;cursor:not-allowed}
+.empty-chat{flex:1;display:flex;align-items:center;justify-content:center;font-size:.5rem;color:var(--text2)}
+
+/* TOOLS - original style, untouched */
+#page-tools{padding:2rem;background:var(--bg)}
+.tools-header{text-align:center;margin-bottom:20px}
+.tools-header h2{font-family:'Oswald',sans-serif;font-size:1.4rem;letter-spacing:4px;color:var(--accent);text-transform:uppercase}
+.tools-header p{font-size:.5rem;color:var(--text2);margin-top:4px;letter-spacing:.12em}
+.tool-layout{display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface);max-width:960px;margin:0 auto}
+.tool-tabs{display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:170px;flex-shrink:0}
+.tool-tab{padding:10px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:.5rem;letter-spacing:.08em;color:var(--text2);border:none;background:transparent;font-family:var(--font);transition:all .2s;text-align:left;border-left:2px solid transparent}
+.tool-tab:hover{background:var(--bg);color:var(--text)}
+.tool-tab.active{background:var(--bg);color:var(--accent);border-left-color:var(--accent);font-weight:700}
+.tool-tab svg{width:16px;height:16px;flex-shrink:0;opacity:.4}
+.tool-tab.active svg{opacity:1}
+.tool-panel{flex:1;padding:24px;display:none;flex-direction:column;gap:10px}
+.tool-panel.active{display:flex}
+.tool-panel .tp-head{display:flex;align-items:center;gap:10px}
+.tool-panel .tp-head svg{width:28px;height:28px;color:var(--text2)}
+.tool-panel .tp-head h3{font-family:'Oswald',sans-serif;font-size:.95rem;letter-spacing:2px;color:var(--accent)}
+.tool-panel .tp-desc{font-size:.55rem;line-height:1.7;color:var(--text2)}
+.tool-panel .tp-feat{display:flex;flex-wrap:wrap;gap:6px}
+.tool-panel .tp-feat span{font-size:.45rem;padding:2px 8px;border:1px solid var(--border);border-radius:3px;color:var(--text2)}
+.tool-panel .tp-link{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:var(--accent);color:var(--surface);border-radius:4px;text-decoration:none;font-size:.5rem;letter-spacing:.1em;transition:opacity .2s;align-self:flex-start;margin-top:4px}
+.tool-panel .tp-link:hover{opacity:.85}
+
+/* KNOWLEDGE - original style, untouched */
+#page-knowledge{padding:2rem;background:var(--surface)}
+.know-header{text-align:center;margin-bottom:20px}
+.know-header h2{font-family:'Oswald',sans-serif;font-size:1.4rem;letter-spacing:4px;color:var(--accent);text-transform:uppercase}
+.know-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;max-width:960px;margin:0 auto}
+.know-card{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;transition:all .2s}
+.know-card:hover{border-color:var(--text2);transform:translateY(-1px)}
+.know-card h4{font-family:'Oswald',sans-serif;font-size:.65rem;letter-spacing:1px;color:var(--text);margin-bottom:4px}
+.know-card p{font-size:.5rem;line-height:1.6;color:var(--text2)}
+.know-card pre{font-size:.45rem;color:var(--accent);margin-top:6px;background:var(--surface);padding:6px;border-radius:4px;border:1px solid var(--border);font-family:var(--mono);white-space:pre-wrap;line-height:1.5}
+.know-locked{position:relative;overflow:hidden;min-height:140px}
+.know-locked .lock-overlay{position:absolute;inset:0;background:rgba(255,255,255,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;z-index:2;border-radius:6px}
+.lock-overlay i{font-size:1.2rem;color:var(--text2)}
+.lock-overlay span{font-size:.5rem;color:var(--text2);text-align:center;max-width:200px;line-height:1.5}
+.lock-overlay a{padding:5px 12px;border:1px solid rgba(88,101,242,.3);border-radius:4px;color:#5865f2;text-decoration:none;font-size:.45rem;transition:all .2s}
+.lock-overlay a:hover{background:rgba(88,101,242,.06)}
+
+/* CONTACT - original style, untouched */
+#page-contact{padding:2rem;text-align:center;background:var(--bg);flex:1;justify-content:center;align-items:center}
+.contact-header h2{font-family:'Oswald',sans-serif;font-size:1.4rem;letter-spacing:4px;color:var(--accent);margin-bottom:4px}
+.contact-header p{font-size:.5rem;color:var(--text2);letter-spacing:.12em;margin-bottom:16px}
+.contact-links{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.contact-links a{display:flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border);border-radius:6px;text-decoration:none;color:var(--text2);font-size:.5rem;transition:all .2s;background:var(--surface)}
+.contact-links a:hover{color:var(--accent);border-color:var(--text2);transform:translateY(-1px)}
+footer{padding:16px;text-align:center;font-size:.4rem;color:var(--text2);opacity:.3;letter-spacing:.1em}
+
+/* RESPONSIVE */
+@media(max-width:768px){
+  nav{overflow-x:auto;justify-content:flex-start;gap:0;padding:0 8px}
+  nav a{padding:8px 10px;font-size:.45rem}
+  .tool-layout{flex-direction:column}
+  .tool-tabs{flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border);min-width:unset}
+  .tool-tab{white-space:nowrap;border-left:none;border-bottom:2px solid transparent;padding:8px 10px}
+  .tool-tab.active{border-left-color:transparent;border-bottom-color:var(--accent)}
+  .chat-sidebar{display:none}
+  .logo-watermark{bottom:12px;left:16px}
+  .logo-watermark img{width:55px;height:55px}
+  .logo-watermark span{font-size:.65rem}
+  .welcome-wrap{flex-direction:column;align-items:flex-start;padding:2rem 1.5rem 3rem;gap:24px}
+  .welcome-logo{width:160px;height:160px}
+  .welcome-content h1{font-size:2.2rem;letter-spacing:5px}
+  .welcome-content{max-width:100%}
+  .know-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body class="page-welcome">
+
+<a class="logo-watermark" href="/">
+  <img src="img/logo3.png" alt="ĐQC">
+  <span>ĐẠO QUÁN</span>
+</a>
+
+<div id="splash">
+  <div class="splash-logo">
+    <img src="img/logo3.png" alt="Đạo Quán Casio">
+  </div>
+  <div class="splash-text"><span>[ click here to enter ]</span></div>
+</div>
+
+<nav id="topNav">
+  <a href="#" data-page="welcome" class="active">Giới Thiệu</a>
+  <a href="#" data-page="chat">Chat</a>
+  <a href="#" data-page="tools">Công Cụ</a>
+  <a href="#" data-page="knowledge">Kiến Thức</a>
+  <a href="#" data-page="contact">Liên Hệ</a>
+</nav>
+
+<div id="main">
+
+<div id="page-welcome" class="page active">
+  <div class="welcome-wrap">
+    <div class="welcome-logo">
+      <img src="img/logo3.png" alt="ĐQC Logo">
+    </div>
+    <div class="welcome-content">
+      <h1>ĐẠO QUÁN</h1>
+      <div class="welcome-tag">CASIO / ROP (assembly)</div>
+      <div class="welcome-typer"><span id="typewriter"></span><span class="cur-blink">_</span></div>
+      <div class="welcome-socials">
+        <a href="https://discord.gg/8PDhggCApb" target="_blank"><i class="fab fa-discord"></i> Discord</a>
+        <a href="https://www.facebook.com/profile.php?id=61573307350981&locale=vi_VN" target="_blank"><i class="fab fa-facebook-f"></i> Facebook</a>
+        <a href="https://github.com/your-profile" target="_blank"><i class="fab fa-github"></i> GitHub</a>
+        <a href="mailto:daoquancasio@gmail.com"><i class="fas fa-envelope"></i> Email</a>
+      </div>
+      <div class="welcome-actions">
+        <a class="btn-primary" href="#" onclick="switchPage('chat');return false"><i class="fas fa-comment"></i> Chat</a>
+        <a class="btn-outline" href="#" onclick="switchPage('tools');return false"><i class="fas fa-tools"></i> Tools</a>
+        <a class="btn-outline" href="/profile.html"><i class="fas fa-user"></i> Profile</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="page-chat" class="page">
+  <div class="chat-layout">
+    <div class="chat-sidebar">
+      <h3># Đạo Quán</h3>
+      <div class="ch-info">Real-time chat đồng bộ với Discord. Login để gửi tin nhắn.</div>
+      <div class="ch-status" id="chatStatus"><i class="fas fa-circle" style="color:#43b581;font-size:6px"></i> Đã kết nối</div>
+      <div style="margin-top:auto;font-size:.45rem;color:var(--text2);opacity:.4;padding-top:12px;border-top:1px solid var(--border)">messages sync with Discord</div>
+    </div>
+    <div class="chat-main">
+      <div class="chat-header">
+        <h2># Chat Chung</h2>
+        <div class="ch-right">
+          <span class="ch-user" id="userDisplay">Offline</span>
+          <button class="ch-btn" id="loginBtn">Login Discord</button>
+        </div>
+      </div>
+      <div class="chat-msgs" id="chatBox">
+        <div class="empty-chat">⏳ Đang tải...</div>
+      </div>
+      <div class="chat-input-area">
+        <input type="text" id="chatInput" placeholder="Login Discord để nhắn tin..." disabled>
+        <button id="sendBtn" disabled>Gửi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="page-tools" class="page">
+  <div class="tools-header">
+    <h2>✦ Công Cụ ✦</h2>
+    <p>ROP / Casio hacking tools</p>
+  </div>
+  <div class="tool-layout">
+    <div class="tool-tabs" id="toolTabs"></div>
+    <div class="tool-panels" id="toolPanels"></div>
+  </div>
+</div>
+
+<div id="page-knowledge" class="page">
+  <div class="know-header">
+    <h2>✦ Kiến Thức ✦</h2>
+    <p style="font-size:.5rem;color:var(--text2);margin-top:4px">ROP Guide + Community Programs</p>
+  </div>
+  <div class="know-grid" id="knowGrid"></div>
+</div>
+
+<div id="page-contact" class="page">
+  <div class="contact-header">
+    <h2>✦ Liên Hệ ✦</h2>
+    <p>Join the cult of Casio hacking</p>
+  </div>
+  <div class="contact-links">
+    <a href="https://discord.gg/8PDhggCApb" target="_blank"><i class="fab fa-discord"></i> Discord</a>
+    <a href="https://www.facebook.com/profile.php?id=61573307350981&locale=vi_VN" target="_blank"><i class="fab fa-facebook-f"></i> Facebook</a>
+    <a href="https://github.com/your-profile" target="_blank"><i class="fab fa-github"></i> GitHub</a>
+    <a href="mailto:daoquancasio@gmail.com"><i class="fas fa-envelope"></i> Email</a>
+  </div>
+  <footer><p>© 2026 Đạo Quán Casio · We are coding "ROP" (assembly)</p></footer>
+</div>
+
+</div>
+
+<script>
+// FIREBASE
+const firebaseConfig={apiKey:"AIzaSyA3T9kqb47wdCbikzU60v1e2FBOaFD-l4g",authDomain:"daoquancasio-eaf37.firebaseapp.com",projectId:"daoquancasio-eaf37",storageBucket:"daoquancasio-eaf37.firebasestorage.app",messagingSenderId:"81639896565",appId:"1:81639896565:web:f00db033997ea4b34b1cbc"};
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth();
+
+// OAUTH TOKEN HANDLER - saves name, avatar for chat
+(function(){
+  const p=new URLSearchParams(window.location.search);
+  const t=p.get('token');const m=p.get('mock')==='true';const n=p.get('name');const a=p.get('avatar');
+  if(t){
+    // Save user info for chat send
+    sessionStorage.setItem('chatUser',JSON.stringify({name:n||'User',avatar:a||''}));
+    if(m){sessionStorage.setItem('mockUser',JSON.stringify({id:t,username:n,avatar:a||''}))}
+    else{
+      firebase.auth().signInWithCustomToken(t).catch(e=>{console.error('Token error:',e);alert('Đăng nhập Discord thất bại: '+e.message)});
+    }
+    window.history.replaceState({},document.title,window.location.pathname);
+  }
+  const mu=sessionStorage.getItem('mockUser');if(mu)window.__mockUser=JSON.parse(mu);
+})();
+
+// SPLASH → TYPEWRITER
+document.getElementById('splash').addEventListener('click',function(){this.classList.add('hide');setTimeout(type,500)},{once:true});
+
+// TYPEWRITER
+const phrases=['We are coding "Casio"','We are coding "ROP" (assembly)','Return-Oriented Programming','Reverse Engineering','Exploit Development'];
+let pi=0,li=0,del=false;
+const tw=document.getElementById('typewriter');
+function type(){
+  const f=phrases[pi];tw.textContent=del?f.substring(0,li-1):f.substring(0,li+1);
+  del?li--:li++;let sp=del?35:70;
+  if(!del&&li===f.length){sp=2000;del=true}else if(del&&li===0){del=false;pi=(pi+1)%phrases.length;sp=500}
+  setTimeout(type,sp);
+}
+
+// NAV with animation
+function switchPage(id){
+  document.body.className='page-'+id;
+  const cur=document.querySelector('.page.active');
+  const next=document.getElementById('page-'+id);
+  if(cur&&cur!==next){
+    cur.classList.remove('active');
+    cur.classList.add('leaving');
+    setTimeout(()=>cur.classList.remove('leaving'),260);
+  }
+  setTimeout(()=>{
+    next.classList.add('active');
+    if(id==='chat'){const cb=document.getElementById('chatBox');if(cb)setTimeout(()=>cb.scrollTop=cb.scrollHeight,50)}
+  },20);
+  document.querySelectorAll('nav a').forEach(a=>a.classList.remove('active'));
+  document.querySelector('nav a[data-page="'+id+'"]').classList.add('active');
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('nav a').forEach(a=>{a.addEventListener('click',e=>{e.preventDefault();switchPage(a.dataset.page)})});
+
+// CHAT — uses server REST API, no Firestore client needed
+const chatBox=document.getElementById('chatBox'),chatInput=document.getElementById('chatInput'),sendBtn=document.getElementById('sendBtn'),loginBtn=document.getElementById('loginBtn'),userDisplay=document.getElementById('userDisplay'),chatStatus=document.getElementById('chatStatus');
+let user=null,pollTimer=null,lastTimestamp=null;
+function renderMsg(m){
+  const div=document.createElement('div');div.className='msg';
+  const time=m.timestamp?new Date(typeof m.timestamp==='object'?m.timestamp.seconds*1000:m.timestamp).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}):'';
+  const src=m.source||'web';
+  div.innerHTML=`<img class="msg-avatar" src="${m.avatar||''}" alt="" onerror="this.style.display='none'"><div class="msg-body"><div class="msg-head"><span class="msg-author">${esc(m.author||'Unknown')}</span><span class="msg-time">${time}</span><span class="msg-source">${src}</span></div><div class="msg-text">${esc(m.text)}</div></div>`;
+  return div;
+}
+async function pollChat(){
+  try{
+    let url='/api/chat/messages?_='+Date.now();
+    if(lastTimestamp)url+='&since='+lastTimestamp;
+    const r=await fetch(url);const msgs=await r.json();
+    if(!msgs||msgs.length===0){
+      if(!lastTimestamp){chatBox.innerHTML='<div class="empty-chat">Chưa có tin nhắn. Hãy là người đầu tiên!</div>';chatStatus.textContent='✦ 0 tin nhắn'}
+    }else{
+      if(lastTimestamp){
+        msgs.forEach(m=>chatBox.appendChild(renderMsg(m)));
+        chatBox.scrollTop=chatBox.scrollHeight;
+      }else{
+        chatBox.innerHTML='';
+        msgs.forEach(m=>chatBox.appendChild(renderMsg(m)));
+        chatBox.scrollTop=chatBox.scrollHeight;
+      }
+      lastTimestamp=msgs[msgs.length-1].timestamp;
+      chatStatus.textContent='✦ '+document.querySelectorAll('.msg').length+' tin nhắn';
+    }
+  }catch(e){console.error('Poll error:',e);if(!lastTimestamp)chatBox.innerHTML='<div class="empty-chat">⚠ Lỗi: '+e.message+'</div>';chatStatus.textContent='⚠ Lỗi kết nối'}
+}
+function startPoll(){pollChat();pollTimer=setInterval(pollChat,3000)}
+auth.onAuthStateChanged(u=>{
+  user=u;
+  if(u){
+    const cu=JSON.parse(sessionStorage.getItem('chatUser')||'{}');
+    userDisplay.textContent=u.displayName||cu.name||u.email||u.uid;loginBtn.textContent='Logout';
+    chatInput.disabled=false;chatInput.placeholder='Nhập tin nhắn...';sendBtn.disabled=false;
+  }else if(window.__mockUser){
+    const cu=JSON.parse(sessionStorage.getItem('chatUser')||'{}');
+    user={uid:'mock',displayName:window.__mockUser.username||cu.name||'Mock User',photoURL:cu.avatar||'',isMock:true};
+    userDisplay.textContent=user.displayName;loginBtn.textContent='Logout';
+    chatInput.disabled=false;chatInput.placeholder='Nhập tin nhắn...';sendBtn.disabled=false;
+  }else{
+    user=null;userDisplay.textContent='Offline';loginBtn.textContent='Login Discord';
+    chatInput.disabled=true;chatInput.placeholder='Login Discord để nhắn tin...';sendBtn.disabled=true;
+  }
+});
+startPoll();
+loginBtn.addEventListener('click',()=>{
+  if(user){if(window.__mockUser){sessionStorage.removeItem('mockUser');window.__mockUser=null}auth.signOut();return}
+  window.location.href='/auth/discord';
+});
+sendBtn.addEventListener('click',sendMsg);
+chatInput.addEventListener('keydown',e=>{if(e.key==='Enter')sendMsg()});
+async function sendMsg(){
+  const txt=chatInput.value.trim();chatInput.value='';
+  try{
+    const cu=JSON.parse(sessionStorage.getItem('chatUser')||'{}');
+    const uid=user.uid||'unknown';
+    const author=user.displayName||cu.name||'User';
+    const avatar=user.photoURL||cu.avatar||'';
+    await fetch('/api/chat/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:txt,uid,author,avatar})})
+  }catch(e){console.error('Send error',e)}
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+// TOOLS
+const tools=[
+  {id:'p2b',name:'P2B Pro',desc:'Chuyển đổi ảnh ⇄ bitmap hex cho Casio fx-580/880. Hỗ trợ threshold, dithering, filters, zoom, rotate, nhiều hiệu ứng xử lý ảnh. Export hex trực tiếp.',feat:['Image→Hex','Hex→Image','Dither','Filters','Export'],link:'/p2b.html',svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m3 16 4-4 3 3 4-5 7 7"/></svg>'},
+  {id:'decomp',name:'ROP Decompiler',desc:'Dịch ngược hex dump → Assembly SH-3/nX-U16. Tích hợp 300+ gadgets, phân tích opcode tự động, tra cứu keycode Casio, highlight cú pháp.',feat:['300+ Gadgets','SH-3 Disas','nX-U16','Keycode Map','Syntax Highlight'],link:'/tool-decomp.html',svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>'},
+  {id:'comp',name:'ROP Compiler',desc:'Biên dịch Assembly SH-3 → Hex. Hỗ trợ label, pseudo-instructions, call, adr_of, org directive. Dịch ngược hex→asm tích hợp.',feat:['ASM→Hex','Labels','adr_of','call','org','Disas'],link:'/tool-comp.html',svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>'},
+  {id:'comp5',name:'HD Compiler 580',desc:'Compiler nX-U16/100 cho fx-580VN X. Đã chuyển sang Discord bot — dùng lệnh <code>c!comp5</code> trong server.',feat:['Discord Bot','c!comp5','580VN X'],link:'/tool-comp5.html',svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M15 9l3 3-3 3M9 15l-3-3 3-3"/></svg>'},
+  {id:'comp8',name:'HD Compiler 880',desc:'Compiler cho fx-880BTG. Đã chuyển sang Discord bot — dùng lệnh <code>c!comp8</code> trong server.',feat:['Discord Bot','c!comp8','880BTG'],link:'/tool-comp8.html',svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h2v6H9zM13 9h2v6h-2z"/><path d="M15 9l3 3-3 3M9 15l-3-3 3-3"/></svg>'},
+  {id:'hex',name:'Hex Tools',desc:'Bộ công cụ hex toàn diện: dịch hex ⇄ text, gán hex vào địa chỉ, split dòng, format offset, calculator, hex→image bitmap 192×63.',feat:['Dịch Hex','Gán Hex','Split','Format','Offset','H2I'],link:'/tool-hex.html',svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 7 22 17 12 22 2 17 2 7 12 2"/><path d="M12 22V12M22 7l-10 5M2 7l10 5M12 12l10-5M12 12L2 7"/></svg>'}
+];
+const tc=document.getElementById('toolTabs'),pc=document.getElementById('toolPanels');
+tools.forEach((t,i)=>{
+  const tb=document.createElement('button');tb.className='tool-tab'+(i===0?' active':'');tb.innerHTML=`${t.svg}<span>${t.name}</span>`;tb.dataset.tab=t.id;
+  tb.addEventListener('click',()=>{document.querySelectorAll('.tool-tab, .tool-panel').forEach(e=>e.classList.remove('active'));tb.classList.add('active');document.getElementById('tp-'+t.id).classList.add('active')});
+  tc.appendChild(tb);
+  const pn=document.createElement('div');pn.className='tool-panel'+(i===0?' active':'');pn.id='tp-'+t.id;
+  pn.innerHTML=`<div class="tp-head">${t.svg}<h3>${t.name}</h3></div><div class="tp-desc">${t.desc}</div><div class="tp-feat">${t.feat.map(f=>`<span>${f}</span>`).join('')}</div><a class="tp-link" href="${t.link}">Open Tool →</a>`;
+  pc.appendChild(pn);
+});
+
+// KNOWLEDGE
+const kc=[
+  {title:'Thanh ghi (Registers)',content:'QR0(8B) → XR0/XR4(4B) → ER0-ER14(2B) → R0-R15(1B).',code:'QR0 ← XR0(ER0/ER2) + XR4(ER4/ER6)'},
+  {title:'Bộ nhớ RAM',content:'16 MB (256 segment × 64KB). Runtime: 0xD730.',code:'0xDDD4: screen buffer 1\n0xD730: runtime\n0xE9E0: backup'},
+  {title:'Cú pháp Assembly',content:'MOV, ADD, SUB, CMP, L, ST, PUSH, POP, B, BL, RT, NOP.',code:'hex 00 01 → 0x0100\ncall 17B34 = 34 7B 31 30'},
+  {title:'printline (0x23DC8)',content:'In chữ font to. R0: linepos, ER2: địa chỉ chuỗi.',code:'xr0 = 0x3021, adr_of text\nprintline'},
+];
+const pcards=['Tug of War','Đồng hồ Analog','Logo Editor Flexio','Text Editor Văn Huy','Trình vẽ 3 màu','Calculator Locker','Flying Logo','Human Walking','Slime Di Chuyển','Quickcpy++','DVD Ngắn Nhất','Đồng hồ kim','Trình vẽ đồ thị','Quadrilateral Editor','Draw+Scrolling','Heart Scrolls'];
+const g=document.getElementById('knowGrid');
+kc.forEach(k=>{const c=document.createElement('div');c.className='know-card';c.innerHTML=`<h4>${k.title}</h4><p>${k.content}</p>${k.code?`<pre>${k.code}</pre>`:''}`;g.appendChild(c)});
+const ps=document.createElement('div');ps.className='know-card know-locked';
+ps.innerHTML=`<div class="lock-overlay"><i class="fab fa-discord"></i><span>Join Discord để xem programs + hex code</span><a href="https://discord.gg/8PDhggCApb" target="_blank">Join Discord →</a></div><h4>📦 Community Programs (${pcards.length})</h4><div style="display:flex;flex-direction:column;gap:3px;margin-top:6px">${pcards.map(p=>`<div style="font-size:.45rem;padding:3px 0;border-bottom:1px solid var(--border);color:var(--text2)">${p}</div>`).join('')}</div>`;
+g.appendChild(ps);
+</script>
+</body>
+</html>

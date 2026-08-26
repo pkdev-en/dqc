@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROP Compiler · ASM → Hex</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&family=Cinzel+Decorative:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#030303;--fg:#e2e8f0;--white:#fff;--gray:#888;--card-bg:rgba(15,15,20,.4);--dark:#111;--font:'JetBrains Mono',monospace;--font2:'Cinzel Decorative',serif}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+nav{background:rgba(15,15,20,.6);color:var(--fg);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,.06)}
+.nav-logo{font-family:var(--font2);font-size:.65rem;letter-spacing:.2em;color:var(--fg)}
+.nav-logo span{color:var(--gray)}
+.nav-back{color:var(--gray);text-decoration:none;font-size:.55rem;letter-spacing:.12em;padding:4px 10px;border:1px solid rgba(255,255,255,.15);border-radius:3px;transition:all .3s}
+.nav-back:hover{color:var(--white);border-color:var(--white)}
+.hero{padding:50px 24px 30px;text-align:center;border-bottom:1px solid rgba(255,255,255,.06)}
+.hero-title{font-family:var(--font2);font-size:1.1rem;letter-spacing:.12em;margin-bottom:4px;color:var(--fg)}
+.hero-sub{font-size:.55rem;letter-spacing:.2em;opacity:.5;text-transform:uppercase}
+.tool-area{flex:1;padding:24px;max-width:900px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:16px}
+.input-group{display:flex;flex-direction:column;gap:6px}
+.input-group label{font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.4;color:var(--gray)}
+textarea{width:100%;min-height:140px;background:var(--dark);color:var(--fg);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:12px;font-family:var(--font);font-size:.75rem;line-height:1.5;resize:vertical;outline:none}
+textarea:focus{border-color:rgba(255,255,255,.3)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{background:transparent;color:var(--fg);border:1px solid rgba(255,255,255,.2);padding:8px 18px;font-family:var(--font);font-size:.65rem;letter-spacing:.1em;cursor:pointer;border-radius:4px;transition:all .3s;font-weight:700}
+.btn:hover{background:rgba(255,255,255,.08);border-color:var(--white)}
+.btn-light{background:rgba(255,255,255,.05);color:var(--gray);border:1px solid rgba(255,255,255,.1)}
+.btn-light:hover{background:rgba(255,255,255,.1);border-color:var(--gray)}
+.output-area{background:var(--bg);color:#0f0;border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:12px;min-height:120px;font-family:var(--font);font-size:.7rem;line-height:1.6;white-space:pre-wrap;overflow:auto}
+.stats{font-size:.55rem;color:var(--gray);margin-top:4px}
+.help-box{background:var(--dark);border:1px solid rgba(255,255,255,.06);border-radius:6px;padding:14px;font-size:.6rem;line-height:1.6;margin-top:8px;color:var(--gray)}
+.help-box code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:2px;font-size:.55rem;color:var(--fg)}
+@media(max-width:600px){.tool-area{padding:16px}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo"><span>✦</span> ROP Compiler</div>
+  <a class="nav-back" href="/">← Back</a>
+</nav>
+
+<div class="hero">
+  <div class="hero-title">🔧 ROP Compiler</div>
+  <div class="hero-sub">Assembly SH-3 → Hex</div>
+</div>
+
+<div class="tool-area">
+  <div class="input-group">
+    <label>Assembly Input</label>
+    <textarea id="asmInput" placeholder="Nhập assembly SH-3...&#10;VD:&#10;setlr&#10;pop er0,rt&#10;er0=er8,pop er8,rt&#10;&#10;Hỗ trợ: gadgets, hex raw, call, adr_of, org, labels"></textarea>
+  </div>
+  <div class="btn-row">
+    <button class="btn" onclick="compile()">▶ Compile</button>
+    <button class="btn btn-light" onclick="clearAll()">✕ Clear</button>
+    <span class="stats" id="stats"></span>
+  </div>
+  <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.6;margin-top:8px">Hex Output</label>
+  <div class="output-area" id="output">Nhập ASM và nhấn "Compile"...</div>
+
+  <div class="help-box">
+    <b>Hướng dẫn:</b><br>
+    • <code>setlr</code> — gadget name → hex (4 bytes)<br>
+    • <code>pop er0,rt</code> — gadget name → hex<br>
+    • <code>hex FD 24 30 30</code> — raw hex passthrough<br>
+    • <code>call ffff</code> — BL call (4 bytes)<br>
+    • <code>er0=er8,pop er8,rt</code> — any gadget name<br>
+    • <code>org D730</code> — set base address<br>
+    • <code>label:</code> — define label<br>
+    • <code>adr_of label</code> — label address (2 bytes)
+  </div>
+</div>
+
+<script>
+const GADGET_MAP = {
+  0x09fa8:"setlr",0x308d0:"setlr_pc",0x0a05c:"DI,RT",
+  0x23f9e:"calc_checksum_set_f004",0x23fa6:"calc_checksum_no_set_f004",
+  0x23fad:"calc_checksum_0",0x23fc0:"calc_checksum_1",0x23fd4:"calc_checksum_2",
+  0x23fea:"calc_checksum_3",0x23f21:"pr_checksum",0x09ca0:"[er8]+=er2,pop xr8",
+  0x2702e:"sp=er14,pop er14,rt",0x12da6:"sp=er14,pop qr8",
+  0x23f82:"sp=er14,pop qr8,pop qr0",0x20d60:"sp=er14,pop er14",
+  0x21f74:"sp=er6,pop er8",0x09820:"sp=er14,pop xr12",0x13aac:"sp=er14,pop qr8,pop er6",
+  0x0ac34:"er14=sp,rt",0x0a8a8:"nop",0x13b66:"er0+=er0,er0+=er2,er8=[er0]",
+  0x13b9a:"er0+=er0,er2+=er0,er0=[er2]",0x1ec0c:"pop ea",0x27030:"pop er14,rt",
+  0x13332:"pop er0,rt",0x18974:"pop er2",0x250a6:"pop er4",0x0a8a6:"pop er8",
+  0x16eca:"pop er12,rt",0x17bda:"pop qr0",0x12da8:"pop qr8",0x177da:"pop r0",
+  0x1844a:"pop r8",0x1622e:"pop xr0",0x1d040:"pop xr4",0x183a6:"pop xr8",
+  0x0d516:"pop er10",0x0d04c:"pop r12",0x12602:"pop er0",0x21636:"pop er12",
+  0x15c78:"pop er14",0x13ab0:"pop er6",0x1dcf6:"pop er6,rt",0x20730:"pop xr12",
+  0x16d88:"pop er4,rt",0x16d7c:"pop er8,rt",0x17072:"pop qr0,rt",0x14c50:"pop qr8,rt",
+  0x15fc0:"pop r4",0x16210:"pop r4,rt",0x14c98:"pop r9",0x10e5a:"pop xr12,rt",
+  0x1d972:"pop xr4,rt",0x0e5e2:"pop xr8,rt",0x093b8:"pop er2,pop er8,er0=er2,rt",
+  0x1893a:"pop er0,pop er4",0x16754:"pop er4,pop er8",0x201f6:"pop er4,pop er12,pop r9",
+  0x14bd8:"er0+=er4,rt",0x13b80:"er4+=er0,r8=r8,rt",0x21ba8:"er0+=er8,rt",
+  0x21bae:"er2+=er8,rt",0x2fa0c:"er0+=er2,rt",0x16078:"er0+=1,rt",
+  0x09ce4:"r0+=1,rt",0x14fcc:"er0+=er6,er10=er0,rt",0x20838:"and r0,0f",
+  0x24008:"er6=er0,er0=er8,pop qr8",0x16170:"er8=er0",0x0ea70:"er2=er0,er0=er2,pop er8,rt",
+  0x14bd6:"er2=er0,er0+=er4,rt",0x0bf30:"er0=er2,rt",0x2470a:"er0=er4,pop er4",
+  0x2f786:"er0=er8,pop er8,rt",0x0a246:"er0=er8,pop er8",0x15386:"er0=er8",
+  0x1edea:"er0=er6,pop er8,pop xr4,rt",0x28c86:"er2=er0,r0=r4,r1=0,pop xr4,rt",
+  0x2ffc0:"r0=r5,pop er4",0x1abb0:"r0=r2=0",0x1abb2:"r0=r2",0x15fde:"r2=r0,pop er0",
+  0x164e4:"r2=r0,pop r6,pop er12",0x177b4:"r2=0,r7=4",0x1ca8a:"r0=0",
+  0x1DD54:"r0=0,rt",0x1DD58:"r0=1,rt",0x18978:"r0=0,pop er2",0x2ac30:"r1=0,rt",
+  0x16df2:"r5=0,rt",0x17b32:"er14=er0,pop xr0",0x0ac7c:"er0=er12,pop er12,rt",
+  0x13916:"er10=er2,rt",0x20b52:"er0=er10,pop xr8",0x1e60c:"er0=1,rt",
+  0x180d2:"er2=0,er4=0,er6=0,er8=1,rt",0x09caa:"er2=0,r0=2,[er8]=er2,pop xr8",
+  0x0a88a:"er2=1,r0=r2,rt",0x09c9e:"r0=0,[er8]+=er2,pop xr8",
+  0x27e7c:"r2=1,r0=r2,pop er4,pop er8,rt",0x27e92:"r0=r1,rt",
+  0x14fce:"er10=er0,rt",0x283fe:"er2=0,er0=er2,pop er8",0x140e4:"er0=er6,er2=er12",
+  0x16e18:"r4=0",0x0eda0:"er0=0,rt",0x16d9a:"[er2]=er0,r2=0,pop er4,rt",
+  0x139d8:"[er0]=er2,rt",0x208b2:"[er0]=r2,rt",0x203D2:"[er0]=r2",
+  0x176d4:"[er2]=r0,r2=0",0x09ca4:"[er8]=er2,pop xr8",0x13330:"[er4]=er0,pop er0,rt",
+  0x1a588:"[ea]=qr0",0x22226:"[er12]=er14,pop xr4,pop qr8",0x1332a:"[er4]+=1,rt",
+  0x13336:"[er4]-=1,rt",0x19e5a:"er8=[ea+],rt",0x16614:"[er2]=r0,r0=0",
+  0x16d7a:"er4=[er8],pop er8,rt",0x13b9e:"er0=[er2],r2=9,rt",0x13b6a:"er8=[er0],rt",
+  0x09e4a:"r0=[er2]",0x18274:"r0=[er0]",0x298dc:"er0=[er0],pop xr8,rt",
+  0x09fdc:"r0=[ea],rt",0x21f72:"sp=[er8],pop er8",0x1c2c0:"qr0=[ea],lea D002H,[ea]=qr0",
+  0x1c64a:"er6=[ea]",0x09e8a:"er0-=er2,rt",0x29a40:"er0-=er12,pop er8,pop er12,rt",
+  0x09e98:"r0-=1,rt",0x0ac5a:"r0-=r8,pop er8,rt",0x122d4:"or r0,r1",0x1a5c2:"or qr0,qr8",
+  0x20830:"r0>>4,rt",0x1bb28:"qr0>>4,rt",0x1bb5c:"r0<<4,rt",0x1bb70:"r1<<4,rt",
+  0x1bb5a:"er0<<4,rt",0x1bb56:"xr0<<4,rt",0x1bb4e:"qr0<<4,rt",
+  0x0c790:"er0-er2_gt,r0=0|r0=1,rt",0x09ae6:"er0-er2_eq,r0=1|r0=0,rt",
+  0x0c7a8:"er2-er0_gt,r0=0|r0=1,rt",0x2abda:"er0-er2_le,er0=er2,rt",
+  0x297e2:"er8-er0_lt,pop xr8",0x091ec:"r0-0_lt,rt",0x091f4:"r1-0_lt,rt",
+  0x14bd4:"er0*=r2,er2=er0,er0+=er4,rt",0x14fca:"er0*=r2,er0+=er6,er10=er0,rt",
+  0x28C54:"er0/=r2,rt",0x160c2:"sp+=20",0x162d4:"sp+=10",0x168f0:"sp+=2",
+  0x1d3c8:"sp+=4",0x09932:"sp+=6,pop qr8",0x13184:"sp+=50,pop qr8",
+  0x131f6:"sp+=20,pop qr8",0x13320:"sp+=30,pop qr8",0x15c76:"sp+=30,pop er14",
+  0x1d3f2:"sp+=2,r0=0",0x1d798:"sp+=20,pop xr12",0x21634:"sp+=10,pop er12",
+  0x21b9c:"sp+=60,pop xr8",0x284ac:"sp+=4,pop xr8",0x08f74:"sp+=64,pop er6,pop qr8",
+  0x098ec:"sp+=4,pop qr8,pop xr4",0x13412:"sp+=40,pop qr8,pop xr4",
+  0x138a6:"sp+=60,pop qr8,pop xr4",0x18266:"sp+=50,pop qr8,pop xr4",
+  0x193a0:"sp+=50,pop xr4,pop qr8",0x202b0:"sp+=120,pop qr8,pop xr4",
+  0x20660:"sp+=2,pop xr4,pop qr8",0x21b9a:"sp+=120,pop xr8",
+  0x26b12:"sp+=2,r0=1,pop er8",0x2122a:"sp+=32,r2=r0,pop xr8",
+  0x18614:"?r0=00",0x33030:"brk",0x0d71c:"[ea]+=1,r0=3",0x2c81e:"[ea]-=1,pop xr4",
+  0x24836:"B LEAVE",0x09450:"BL memcpy,pop er0",0x203CC:"BL strcpy",
+  0x203E0:"BL strcat",0x09D3A:"BL memset,pop er2",0x23CAC:"BL delay,pop xr0",
+  0x20C40:"BL line_print",0x23F62:"BL printline",0x24004:"BL hex_byte,er6=er0,er0=er8,pop qr8",
+  0x20A50:"BL smart_strcpy,pop er8",0x0A052:"BL zero_KO",0x28AC2:"BL line_draw",
+  0x09AD4:"BL render.ddd4",0x2B2BA:"memcpy_auto_jmp",0x08f80:"line_print",
+  0x25c1c:"getkeycode",0x09E96:"[ea+]=r0,r0-=1,bne",0x09C20:"cmp_ea",
+  0x17922:"calc_func",0x16082:"cvt_hex_1",0x160f8:"cvt_hex_2",
+  0x10f20:"memcpy_length_rn/8",0x1700e:"memcpy_length_rn/2,pop qr0",0x13324:"pop pc",
+  0x0E5C8:"strcpy",0x2EDA0:"strcat",0x26FFA:"memcpy",0x0A8AA:"memmove",
+  0x29A2C:"strlen",0x1EB94:"memset",0x203C2:"smart_strcpy",0x203D6:"smart_strcat",
+  0x203B8:"smart_strlen_n",0x2086C:"basen_base_print",0x23DCC:"smallprint",
+  0x08F7C:"line_print.col_0",0x08F7E:"line_print",0x23DC8:"printline",
+  0x09470:"render.e3d4",0x0947C:"render.ddd4",0x09848:"render_bitmap",
+  0x09D34:"memzero",0x26086:"reset_routine",0x24BD6:"get_string_constant",
+  0x08C0C:"fill_screen",0x08F02:"str_decompress_print",0x09F3C:"delay",
+  0x0A1CE:"_start",0x293D8:"main",0x09440:"buf1_to_buf2",0x09458:"buf2_to_buf1",
+  0x2AB26:"byte_strlen_n",0x23C4C:"diagnostic_mode",
+  0x08E62:"line_draw",0x091FC:"pixel_draw",0x090D2:"draw_glyph",
+  0x0A0A8:"rt"
+};
+
+const NAME_MAP = {};
+for (let [k,v] of Object.entries(GADGET_MAP)) NAME_MAP[v] = parseInt(k);
+
+const VALUE_TO_NAME = {0x0180:"key_shift",0x0280:"key_alpha",0x1080:"key_menu",0x0480:"key_up",0x0840:"key_down",0x0440:"key_left",0x0880:"key_right",0x0140:"key_optn",0x0240:"key_calc",0x1040:"key_intg",0x2040:"key_x",0x0120:"key_frac",0x0220:"key_sqrt",0x0420:"key_sqr",0x0820:"key_power",0x1020:"key_logb",0x2020:"key_inx",0x0110:"key_neg",0x0210:"key_deg",0x0410:"key_inv",0x0810:"key_sin",0x1010:"key_cos",0x2010:"key_tan",0x0108:"key_sto",0x0208:"key_eng",0x0408:"key_lpar",0x0808:"key_rpar",0x1008:"key_std",0x2008:"key_addm",0x4010:"key_0",0x0101:"key_1",0x0201:"key_2",0x0401:"key_3",0x0102:"key_4",0x0202:"key_5",0x0402:"key_6",0x0104:"key_7",0x0204:"key_8",0x0404:"key_9",0x4008:"key_dot",0x0804:"key_del",0x1004:"key_ac",0x4001:"key_exe",0x4002:"key_ans",0x4004:"key_exp",0x0801:"key_add",0x1001:"key_sub",0x0802:"key_mul",0x1002:"key_div",0x83DA:"adrcvtkey",0xD000:"reg0",0xD009:"reg0.9",0xD110:"modifiers",0xD111:"mode",0xD112:"submode",0xD11A:"num_format",0xD11B:"num_format_i",0xD11D:"angle_unit",0xD138:"draw_mode",0xD180:"input_range",0xD318:"unstable_char",0xD31A:"var_m",0xD324:"var_ans",0xD32E:"var_a",0xD338:"var_b",0xD342:"var_c",0xD34C:"var_d",0xD356:"var_e",0xD360:"var_f",0xD36A:"var_x",0xD374:"var_y",0xD37E:"var_preans",0xD388:"var_z",0xD392:"calc_history",0xD139:"current_screen_buffer",0xDDD4:"screen_buffer",0xD137:"font_size",0xD113:"cursor_noflash",0xDBD0:"magic_string"};
+const VALUE_TO_HEX = {}; for (let [k,v] of Object.entries(VALUE_TO_NAME)) VALUE_TO_HEX[v] = k;
+const HEX_PAIR = /^[0-9a-fA-F]{2}$/;
+
+function stripComments(asm) {
+  return asm.split('\n').filter(l => {
+    let s = l.trim();
+    return s && !s.startsWith(';') && !s.startsWith('#');
+  }).join('\n');
+}
+
+function compile() {
+  let input = document.getElementById('asmInput').value;
+  if (!input.trim()) { document.getElementById('output').textContent = '❌ Nhập assembly.'; return; }
+  try {
+    let result = compileAsm(input);
+    document.getElementById('output').textContent = result.hex;
+    document.getElementById('stats').textContent = `${result.bytes} bytes · ${result.count} instructions`;
+  } catch(e) {
+    document.getElementById('output').textContent = `❌ Lỗi: ${e.message}`;
+  }
+}
+
+function compileAsm(asm) {
+  let lines = stripComments(asm).split('\n').map(l => l.trim()).filter(l => l);
+  let orgAddr = 0xD730, currentAddr = orgAddr;
+  let labels = {}, instructions = [];
+
+  // Pass 1: scan labels & calculate addresses
+  for (let line of lines) {
+    if (line.startsWith('org ')) {
+      orgAddr = parseInt(line.slice(4).trim(), 16) || orgAddr;
+      currentAddr = orgAddr;
+      continue;
+    }
+    if (line.endsWith(':')) {
+      labels[line.slice(0,-1).trim()] = currentAddr;
+      continue;
+    }
+    instructions.push({ text: line, addr: currentAddr });
+    currentAddr += getSize(line);
+  }
+
+  // Pass 2: generate hex
+  let out = [];
+  for (let inst of instructions) {
+    let line = inst.text;
+    if (line.startsWith('hex ')) {
+      for (let p of line.slice(4).trim().split(/\s+/)) out.push(parseInt(p,16));
+      continue;
+    }
+    if (NAME_MAP[line] !== undefined) {
+      let v = NAME_MAP[line];
+      out.push(v & 0xFF, (v >> 8) & 0xFF, ((v >> 16) & 0xF) + 0x30, 0x30);
+      continue;
+    }
+    if (VALUE_TO_HEX[line] !== undefined) {
+      let v = VALUE_TO_HEX[line];
+      out.push(v & 0xFF, (v >> 8) & 0xFF);
+      continue;
+    }
+    let m = line.match(/^call\s+([0-9a-fA-F]+)$/i);
+    if (m) {
+      let v = parseInt(m[1],16);
+      out.push(v & 0xFF, (v >> 8) & 0xFF, ((v >> 16) & 0xF) + 0x30, 0x30);
+      continue;
+    }
+    if (line.includes('=')) {
+      let parts = line.split('=').slice(1).join('=').trim();
+      for (let seg of parts.split(',')) {
+        seg = seg.trim();
+        if (seg.startsWith('hex ')) {
+          for (let p of seg.slice(4).trim().split(/\s+/)) out.push(parseInt(p,16));
+        } else if (seg.startsWith('adr_of')) {
+          let tok = seg.split(/\s+/);
+          let lname = tok[tok.length-1];
+          let la = labels[lname] || 0;
+          out.push(la & 0xFF, (la >> 8) & 0xFF);
+        } else if (VALUE_TO_HEX[seg] !== undefined) {
+          let v = VALUE_TO_HEX[seg];
+          out.push(v & 0xFF, (v >> 8) & 0xFF);
+        } else if (HEX_PAIR.test(seg)) {
+          out.push(parseInt(seg,16));
+        } else {
+          throw new Error(`Token không hợp lệ: '${seg}'`);
+        }
+      }
+      continue;
+    }
+    // Tokenize
+    let tokens = line.replace(/,/g,' ').split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      let tok = tokens[i];
+      if (tok === 'adr_of') {
+        let lname = tokens[i+2] || tokens[i+1];
+        let off = 0;
+        if (tokens[i+1] && tokens[i+1].startsWith('[')) {
+          off = parseInt(tokens[i+1].replace(/[\[\]]/g,'')) || 0;
+          i += 3;
+        } else { i += 2; }
+        let la = (labels[lname] || 0) + off;
+        out.push(la & 0xFF, (la >> 8) & 0xFF);
+        continue;
+      }
+      if (NAME_MAP[tok] !== undefined) {
+        let v = NAME_MAP[tok];
+        out.push(v & 0xFF, (v >> 8) & 0xFF, ((v >> 16) & 0xF) + 0x30, 0x30);
+      } else if (VALUE_TO_HEX[tok] !== undefined) {
+        let v = VALUE_TO_HEX[tok];
+        out.push(v & 0xFF, (v >> 8) & 0xFF);
+      } else if (HEX_PAIR.test(tok)) {
+        out.push(parseInt(tok,16));
+      } else {
+        throw new Error(`Lệnh không hợp lệ: '${tok}'`);
+      }
+    }
+  }
+
+  let hexStr = out.map(b => b.toString(16).padStart(2,'0')).join(' ');
+  return { hex: hexStr, bytes: out.length, count: instructions.length };
+}
+
+function getSize(line) {
+  if (line.startsWith('hex ')) return line.slice(4).trim().split(/\s+/).length;
+  if (NAME_MAP[line] !== undefined) return 4;
+  if (VALUE_TO_HEX[line] !== undefined) return 2;
+  if (/^call\s+/i.test(line)) return 4;
+  if (line.includes('=')) {
+    let s = 0;
+    for (let seg of line.split('=').slice(1).join('=').split(',')) {
+      seg = seg.trim();
+      if (seg.startsWith('hex ')) s += seg.slice(4).trim().split(/\s+/).length;
+      else if (seg.startsWith('adr_of')) s += 2;
+      else if (VALUE_TO_HEX[seg] !== undefined) s += 2;
+      else if (HEX_PAIR.test(seg)) s += 1;
+    }
+    return s;
+  }
+  let tokens = line.replace(/,/g,' ').split(/\s+/);
+  let s = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    let tok = tokens[i];
+    if (tok === 'adr_of') { s += 2; i += (tokens[i+1]&&tokens[i+1].startsWith('['))?3:2; continue; }
+    if (NAME_MAP[tok] !== undefined) s += 4;
+    else if (VALUE_TO_HEX[tok] !== undefined) s += 2;
+    else if (HEX_PAIR.test(tok)) s += 1;
+  }
+  return s;
+}
+
+function clearAll() {
+  document.getElementById('asmInput').value = '';
+  document.getElementById('output').textContent = 'Nhập ASM và nhấn "Compile"...';
+  document.getElementById('stats').textContent = '';
+}
+
+document.getElementById('asmInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.ctrlKey) compile();
+});
+</script>
+</body>
+</html>

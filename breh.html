@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2B Pro Ultra - Casio Image ⇄ Bitmap Hex & Multi-level Grayscale</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#1c2333;--border:#30363d;
+  --text:#e6edf3;--text2:#8b949e;--accent:#58a6ff;--accent2:#3fb950;--accent3:#d29922;
+  --danger:#f85149;--radius:8px;--font:'Segoe UI','Helvetica Neue',Arial,sans-serif;
+  --mono:'Cascadia Code','JetBrains Mono','Fira Code',monospace;
+  --lcd-bg:#8fa78a;--lcd-fg:#112211;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700}
+.logo span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.status-bar{display:flex;flex-wrap:wrap;gap:3px 8px;font-size:11px;font-family:var(--mono);color:var(--text2)}
+.status-bar .badge{background:var(--surface2);padding:2px 7px;border-radius:3px;border:1px solid var(--border);white-space:nowrap}
+.status-bar .badge.highlight{color:var(--accent2);border-color:var(--accent2)}
+.status-bar .badge.mode{color:var(--accent);border-color:var(--accent)}
+.status-bar .badge.warn{color:var(--accent3);border-color:var(--accent3)}
+
+.layout{display:flex;flex:1;min-height:0;gap:0}
+
+.canvas-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;overflow:hidden;position:relative;min-width:0}
+.canvas-wrapper{display:flex;flex-direction:column;align-items:center;gap:6px;max-width:100%;max-height:100%}
+.canvas-wrapper canvas{display:block;image-rendering:pixelated;border:2px solid #333;border-radius:3px;background:var(--lcd-bg);max-width:100%;max-height:calc(100vh - 200px);width:auto;height:auto;box-shadow:0 4px 14px rgba(0,0,0,0.5)}
+.canvas-wrapper.theme-bw canvas{background:#000}
+.canvas-info{display:flex;gap:12px;font-size:11px;font-family:var(--mono);color:var(--text2);flex-wrap:wrap;justify-content:center}
+.canvas-info b{color:var(--text)}
+.empty-state{display:flex;flex-direction:column;align-items:center;gap:10px;padding:40px 20px;color:var(--text2)}
+.empty-state .icon{font-size:48px;opacity:.3}
+.empty-state .btn-upload{background:var(--accent);color:#fff;border:none;padding:8px 20px;border-radius:var(--radius);cursor:pointer;font-size:13px;font-weight:600}
+.empty-state .btn-upload:hover{filter:brightness(1.1)}
+.empty-state input[type=file]{display:none}
+.canvas-tools{display:flex;gap:5px;flex-wrap:wrap;justify-content:center}
+.canvas-tools button{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:var(--mono)}
+.canvas-tools button:hover{border-color:var(--accent);color:var(--accent)}
+
+.sidebar{width:330px;background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;padding:8px;flex-shrink:0}
+@media(max-width:850px){.sidebar{width:260px}}
+
+.mode-tabs{display:flex;gap:0;margin-bottom:8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.mode-tab{flex:1;padding:6px 8px;text-align:center;font-size:11px;font-weight:600;cursor:pointer;background:var(--surface2);color:var(--text2);border:none;transition:all .15s}
+.mode-tab:not(:last-child){border-right:1px solid var(--border)}
+.mode-tab.active{background:var(--accent);color:#fff}
+
+.section{margin-bottom:8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.section-title{background:var(--surface2);padding:6px 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none}
+.section-title .arrow{transition:transform .2s;font-size:9px}
+.section-title.collapsed .arrow{transform:rotate(-90deg)}
+.section-body{padding:6px 10px;display:flex;flex-direction:column;gap:5px}
+.section-body.hidden{display:none}
+
+.ctrl-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.ctrl-row label{font-size:10px;color:var(--text2);min-width:52px;font-weight:500;flex-shrink:0}
+.ctrl-row input[type=range]{flex:1;min-width:50px;height:3px;-webkit-appearance:none;appearance:none;background:var(--border);border-radius:2px;outline:none}
+.ctrl-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--accent)}
+.ctrl-row input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--surface)}
+.ctrl-row .val{font-size:10px;font-family:var(--mono);color:var(--text);min-width:26px;text-align:right;flex-shrink:0}
+.ctrl-row input[type=number]{width:44px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:2px 3px;border-radius:3px;font-size:10px;font-family:var(--mono)}
+.ctrl-row input[type=number]:focus{border-color:var(--accent);outline:none}
+.ctrl-row select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:2px 5px;border-radius:3px;font-size:10px;font-family:var(--mono);outline:none}
+.ctrl-row select:focus{border-color:var(--accent)}
+.ctrl-row .btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:3px;cursor:pointer;font-size:10px;font-family:var(--mono)}
+.ctrl-row .btn:hover{border-color:var(--accent);background:var(--surface)}
+.ctrl-row .btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.ctrl-row .btn.danger{color:var(--danger);border-color:var(--danger)}
+.ctrl-row .btn.danger:hover{background:var(--danger);color:#fff}
+.ctrl-row .btn.green{color:var(--accent2);border-color:var(--accent2)}
+.ctrl-row .btn.green:hover{background:var(--accent2);color:#fff}
+.ctrl-row .btn-sm{padding:1px 5px;font-size:9px}
+.ctrl-divider{border:none;border-top:1px solid var(--border);margin:3px 0}
+.ctrl-hint{font-size:9px;color:var(--text2);padding:1px 0 0 56px}
+.ctrl-row .toggle{position:relative;width:28px;height:16px;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;flex-shrink:0}
+.ctrl-row .toggle.on{background:var(--accent2)}
+.ctrl-row .toggle::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}
+.ctrl-row .toggle.on::after{transform:translateX(12px)}
+.ctrl-row .toggle-label{font-size:10px;color:var(--text2);cursor:pointer}
+.ctrl-row .chip{background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:10px;cursor:pointer;font-family:var(--mono)}
+.ctrl-row .chip:hover{border-color:var(--accent)}
+.ctrl-row .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
+
+.hex-input-area textarea{width:100%;min-height:120px;background:var(--bg);color:var(--accent2);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;line-height:1.4;font-family:var(--mono);resize:vertical;outline:none}
+.hex-input-area textarea:focus{border-color:var(--accent)}
+.hex-stats{font-size:10px;color:var(--text2);margin-top:2px}
+
+#hexOutput{display:none}
+.hex-panel{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
+.hex-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:92vw;max-height:92vh;display:flex;flex-direction:column;min-width:320px;width:640px}
+.hex-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)}
+.hex-header h3{font-size:13px}
+.hex-header button{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px}
+.hex-header button:hover{border-color:var(--accent)}
+.hex-body{padding:12px 14px;overflow:auto;flex:1}
+.hex-body textarea{width:100%;height:280px;background:var(--bg);color:var(--accent2);border:1px solid var(--border);border-radius:4px;padding:10px;font-size:12px;line-height:1.5;font-family:var(--mono);resize:vertical;outline:none}
+.hex-body textarea:focus{border-color:var(--accent)}
+.hex-format-select{display:flex;gap:6px;margin-bottom:8px;align-items:center}
+.hex-format-select select{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:var(--mono)}
+.hex-footer{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.hex-footer button{background:var(--accent);color:#fff;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600}
+.hex-footer button:hover{filter:brightness(1.1)}
+.hex-footer .btn2{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+
+#tutorialOverlay{display:none}
+.tut-panel{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.tut-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:600px;max-height:85vh;display:flex;flex-direction:column}
+.tut-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.tut-header h3{font-size:14px}
+.tut-body{padding:16px;overflow-y:auto;flex:1;font-size:12px;line-height:1.6;color:var(--text)}
+.tut-body b{color:var(--accent)}
+.tut-body code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:11px;color:var(--accent2)}
+.tut-body .step{margin-bottom:12px;padding-left:8px;border-left:2px solid var(--accent)}
+.tut-footer{padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end}
+.tut-footer button{background:var(--accent);color:#fff;border:none;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:12px}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--accent2);color:var(--accent2);padding:8px 20px;border-radius:var(--radius);font-size:12px;font-family:var(--mono);z-index:2000;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.paste-hint{position:absolute;bottom:12px;right:16px;font-size:10px;color:var(--text2);opacity:.4}
+.paste-hint kbd{background:var(--surface2);border:1px solid var(--border);padding:1px 4px;border-radius:2px;font-size:9px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">&#9679; <span>P2B PRO ULTRA</span></div>
+  <div class="status-bar" id="statusBar">
+    <span class="badge mode" id="sMode">&#8594; Hex</span>
+    <span class="badge">Canvas: <span id="sCanvas">192x63</span></span>
+    <span class="badge">Ảnh: <span id="sImg">--</span></span>
+    <span class="badge">Pos: <span id="sPos">(0,0)</span></span>
+    <span class="badge">Dither: <span id="sDitherName">Atkinson</span></span>
+    <span class="badge">Shades: <span id="sShades">1-bit (B&W)</span></span>
+    <span class="badge highlight">Pixels: <span id="sPixels">0</span>/<span id="sTotal">0</span> (<span id="sPct">0</span>%)</span>
+    <span class="badge" id="sInvBadge">Invert: ❌</span>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="canvas-area" id="canvasArea">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">&#128247;</div>
+      <div style="font-size:15px;font-weight:700;margin-bottom:4px">P2B Pro Ultra &mdash; High-Texture Casio Converter</div>
+      <div style="font-size:12px">Kéo thả ảnh | <b>Ctrl+V</b> dán ảnh hoặc hex | Chọn file</div>
+      <div style="font-size:11px;color:var(--accent3);margin-top:6px">&#9889; Đã tích hợp 8 thuật toán Dithering chống mất Texture &amp; Mô phỏng 4 cấp xám Casio</div>
+      <button class="btn-upload" onclick="document.getElementById('fileInput').click()" style="margin-top:10px">Chọn ảnh</button>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <div class="canvas-wrapper" id="canvasWrapper" style="display:none">
+      <canvas id="mainCanvas"></canvas>
+      <div class="canvas-info">
+        <span>Canvas: <b id="ciCanvas">192x63</b></span>
+        <span>Ảnh: <b id="ciImg">--</b></span>
+        <span>Pos: <b id="ciPos">(0,0)</b></span>
+        <span>Zoom: <b id="ciZoom">1x</b></span>
+      </div>
+      <div class="canvas-tools">
+        <button onclick="zoomIn()">+</button>
+        <button onclick="zoomOut()">-</button>
+        <button onclick="zoomFit()">Fit</button>
+        <button onclick="zoomReset()">1:1</button>
+        <button onclick="toggleTheme()" id="btnTheme">LCD Theme</button>
+      </div>
+    </div>
+    <div class="paste-hint"><kbd>Ctrl</kbd>+<kbd>V</kbd> dán ảnh / hex</div>
+  </div>
+
+  <div class="sidebar" id="sidebar">
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tabImgToHex" onclick="setMode('img')">&#128247; Ảnh &#8594; Hex</button>
+      <button class="mode-tab" id="tabHexToImg" onclick="setMode('hex')">&#128290; Hex &#8594; Ảnh</button>
+    </div>
+
+    <!-- MODE: IMAGE TO HEX -->
+    <div id="modeImgPanel">
+    
+    <!-- PRESET DÒNG MÁY & KÍCH THƯỚC -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">PRESET MÀN HÌNH CASIO <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row">
+          <label>Thiết bị</label>
+          <select id="presetSelect" onchange="applyDevicePreset()" style="flex:1">
+            <option value="580_full">fx-580VN X Full (192x63)</option>
+            <option value="580_game">fx-580VN X Game (192x48)</option>
+            <option value="880_full">fx-880BTG Full (216x63)</option>
+            <option value="128x64">Standard 128x64</option>
+            <option value="64x64">Sprite 64x64</option>
+            <option value="32x32">Icon 32x32</option>
+            <option value="16x16">Mini Icon 16x16</option>
+            <option value="8x8">Tiny 8x8</option>
+          </select>
+        </div>
+        <div class="ctrl-row">
+          <label>Canvas</label>
+          <input type="number" id="canvasWInput" value="192" onchange="onCustomCanvas()">
+          <span style="color:var(--text2);font-size:10px">x</span>
+          <input type="number" id="canvasHInput" value="63" onchange="onCustomCanvas()">
+          <button class="btn btn-sm" onclick="onCustomCanvas()">Set</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- THUẬT TOÁN DITHERING & GIỮ TEXTURE -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">TEXTURE &amp; DITHERING (CHỐNG MẤT HÌNH) <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row">
+          <label>Thuật toán</label>
+          <select id="ditherAlgo" onchange="onAdj()" style="flex:1">
+            <option value="atkinson" selected>Atkinson (Khuyên dùng: Siêu nét &amp; chi tiết)</option>
+            <option value="floyd">Floyd-Steinberg (Khuếch tán mịn)</option>
+            <option value="jjn">Jarvis-Judice-Ninke (3 Hàng siêu mượt)</option>
+            <option value="stucki">Stucki (Tương phản cao)</option>
+            <option value="burkes">Burkes (Mịn màng cân bằng)</option>
+            <option value="sierra">Sierra-3 (Chi tiết viền)</option>
+            <option value="bayer4">Bayer 4x4 (Vân caro Retro)</option>
+            <option value="bayer8">Bayer 8x8 (Vân Manga cổ điển)</option>
+            <option value="none">Ngưỡng đơn thuần (No Dither)</option>
+          </select>
+        </div>
+        <div class="ctrl-row">
+          <label>Cấp độ xám</label>
+          <select id="grayLevels" onchange="onAdj()" style="flex:1">
+            <option value="2" selected>2 Cấp (1-bit Đen/Trắng chuẩn)</option>
+            <option value="4">4 Cấp độ xám (Mô phỏng PWM Casio)</option>
+            <option value="8">8 Cấp độ xám (Đa tầng)</option>
+          </select>
+        </div>
+        <div class="ctrl-row">
+          <label>Dither Diff</label>
+          <input type="range" id="ditherAmount" min="0" max="100" value="100" oninput="onAdj()">
+          <span class="val" id="ditherAmountVal">100%</span>
+        </div>
+        <div class="ctrl-row">
+          <label>Tăng viền</label>
+          <input type="range" id="edgeBoost" min="0" max="100" value="30" oninput="onAdj()">
+          <span class="val" id="edgeBoostVal">30%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- VỊ TRÍ & KÍCH THƯỚC ẢNH -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">VỊ TRÍ &amp; CĂN CHỈNH <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Move</label><input type="number" id="moveX" value="0" onchange="actionMove()"><input type="number" id="moveY" value="0" onchange="actionMove()"><button class="btn btn-sm" onclick="actionMove()">&#8594;</button></div>
+        <div class="ctrl-row"><label></label><button class="btn btn-sm" onclick="actionCenter()">Center</button><button class="btn btn-sm" onclick="actionTL()">Top-L</button><button class="btn btn-sm" onclick="actionTR()">Top-R</button><button class="btn btn-sm" onclick="actionBL()">Bot-L</button><button class="btn btn-sm" onclick="actionBR()">Bot-R</button></div>
+        <div class="ctrl-row"><label>Size</label><input type="number" id="sizeW" value="192" onchange="actionSize()"><span style="color:var(--text2);font-size:10px">x</span><input type="number" id="sizeH" value="63" onchange="actionSize()"><button class="btn btn-sm" onclick="actionSize()">&#8594;</button></div>
+        <div class="ctrl-row"><label></label><button class="btn btn-sm" onclick="actionFitToCanvas()">Fit Canvas</button><button class="btn btn-sm" onclick="actionOriginalSize()">Original</button></div>
+      </div>
+    </div>
+
+    <!-- TÙY CHỈNH ÁNH SÁNG & ĐỘ TƯƠNG PHẢN -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">ÁNH SÁNG &amp; CHI TIẾT <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Brightness</label><input type="range" id="brightness" min="-150" max="150" value="0" oninput="onAdj()"><span class="val" id="brightnessVal">0</span></div>
+        <div class="ctrl-row"><label>Contrast</label><input type="range" id="contrast" min="-150" max="150" value="15" oninput="onAdj()"><span class="val" id="contrastVal">15</span></div>
+        <div class="ctrl-row"><label>Exposure</label><input type="range" id="exposure" min="-50" max="50" value="0" step="1" oninput="onAdj()"><span class="val" id="exposureVal">0.0</span></div>
+        <div class="ctrl-row"><label>Gamma</label><input type="range" id="levelsGamma" min="0.2" max="3.0" step="0.1" value="1.0" oninput="onAdj()"><span class="val" id="levelsGammaVal">1.0</span></div>
+        <div class="ctrl-row"><label>Clarity</label><input type="range" id="clarity" min="-100" max="100" value="25" oninput="onAdj()"><span class="val" id="clarityVal">25</span></div>
+        <div class="ctrl-row"><label>Sharpen</label><input type="range" id="smartSharpen" min="0" max="200" value="40" oninput="onAdj()"><span class="val" id="smartSharpenVal">40</span></div>
+        <div class="ctrl-row"><label>Remove BG</label><div class="toggle" id="toggleRemovebg" onclick="toggleRemovebg()"></div><span class="toggle-label" id="removebgLabel">OFF</span></div>
+      </div>
+    </div>
+
+    <!-- RESET & EXPORT -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">NGƯỠNG &amp; XUẤT MÃ <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Threshold</label><input type="range" id="threshold" min="0" max="255" value="128" oninput="onAdj()"><span class="val" id="thresholdVal">128</span><button class="btn btn-sm" onclick="autoOtsuThreshold()">Auto</button></div>
+        <div class="ctrl-row"><label></label><button class="chip" id="chipInvert" onclick="toggleChip(this,'invert')">Invert (Đảo đen trắng)</button></div>
+        <hr class="ctrl-divider">
+        <div class="ctrl-row"><button class="btn danger" onclick="actionReset()">Reset Mặc Định</button></div>
+        <div class="row2" style="margin-top:4px"><button class="btn green" onclick="actionExport()" style="font-weight:700">&#128230; Xuất Dữ Liệu</button><button class="btn" onclick="actionExit()">Xóa Ảnh</button></div>
+      </div>
+    </div>
+    </div><!-- end modeImgPanel -->
+
+    <!-- MODE: HEX TO IMAGE -->
+    <div id="modeHexPanel" style="display:none">
+    <div class="section">
+      <div class="section-title" style="cursor:default">DÁN CHUỖI HEX</div>
+      <div class="section-body hex-input-area">
+        <textarea id="hexInput" placeholder="Dán chuỗi Hex vào đây (hỗ trợ cả hex cách khoảng, mảng C, mã ASM)..." spellcheck="false"></textarea>
+        <div class="hex-stats" id="hexStats">Chưa có dữ liệu</div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">KÍCH THƯỚC BITMAP <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Width</label><input type="number" id="hexW" value="192" min="1" max="2000" onchange="onHexChange()"><span style="color:var(--text2);font-size:10px">px</span></div>
+        <div class="ctrl-row"><label>Height</label><input type="number" id="hexH" value="63" min="1" max="2000" onchange="onHexChange()"><span style="color:var(--text2);font-size:10px">px</span></div>
+        <div class="ctrl-hint">Tự động nhận diện số hàng nếu dữ liệu khớp</div>
+        <hr class="ctrl-divider">
+        <div class="row2"><button class="btn green" onclick="decodeHex()">&#9654; Dịch Hex</button><button class="btn" onclick="clearHex()">Xóa</button></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" style="cursor:default">HIỂN THỊ</div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Invert</label><div class="toggle" id="toggleHexInv" onclick="toggleHexInv()"></div><span class="toggle-label" id="hexInvLabel">OFF</span></div>
+      </div>
+    </div>
+    </div><!-- end modeHexPanel -->
+
+    <!-- TUTORIAL BUTTON -->
+    <div class="ctrl-row" style="padding:6px 0;justify-content:center">
+      <button class="btn" onclick="showTutorial()" style="font-size:11px;padding:4px 16px">&#10067; Hướng dẫn &amp; Thủ thuật</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEX EXPORT MODAL -->
+<div id="hexOutput">
+  <div class="hex-panel">
+    <div class="hex-box">
+      <div class="hex-header"><h3>&#128230; Xuất Dữ Liệu Bitmap Casio</h3><button onclick="closeHex()">&#10005;</button></div>
+      <div class="hex-body">
+        <div class="hex-format-select">
+          <label style="font-size:11px;color:var(--text2)">Định dạng:</label>
+          <select id="exportFormat" onchange="renderExportFormat()">
+            <option value="casio_rop_program">⚡ File .ASM Tự In Lên Màn Hình (Auto-Render ROP)</option>
+            <option value="casio_csc_program">⚡ File .CSC Casio Script Hoàn Chỉnh</option>
+            <option value="hex_rows">Hex Byte (Mỗi dòng 1 hàng LCD)</option>
+            <option value="hex_single">Hex Byte (Một dòng liên tục)</option>
+            <option value="asm_rop">Mã Casio ROP ASM (hex FF FF ...)</option>
+            <option value="c_array">Mảng C Array (uint8_t bitmap[])</option>
+            <option value="casio_dual_pwm">Dual-Buffer PWM (4 Cấp độ xám Casio)</option>
+          </select>
+        </div>
+        <textarea id="hexContent" wrap="off" readonly></textarea>
+        <div style="margin-top:6px;font-size:10px;color:var(--text2)">&#128161; Nhấn <b>Copy</b> để dán vào chương trình Casio hoặc file mã nguồn C / ASM</div>
+      </div>
+      <div class="hex-footer">
+        <button class="btn2" onclick="closeHex()">Đóng</button>
+        <button onclick="copyHex()">&#128203; Copy</button>
+        <button onclick="downloadHex()">&#128229; Tải File .txt</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TUTORIAL MODAL -->
+<div id="tutorialOverlay">
+  <div class="tut-panel">
+    <div class="tut-box">
+      <div class="tut-header"><h3>&#10067; Hướng dẫn tối ưu hóa hình ảnh cho Casio</h3><button onclick="closeTutorial()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer">&#10005;</button></div>
+      <div class="tut-body">
+        <div class="step">
+          <b>&#9312; Bí quyết giữ 100% Texture &amp; Chi tiết:</b><br>
+          - Màn hình Casio là màn đơn sắc 1-bit. Thuật toán <b>Atkinson</b> và <b>Floyd-Steinberg</b> sử dụng kỹ thuật tán lỗi vi sai (Error Diffusion) giúp phân bố các hạt điểm tạo nên độ sâu quang học sống động.<br>
+          - Hãy tăng thanh <b>Tăng viền (Edge Boost)</b> và <b>Clarity</b> lên 30-50% để mắt, mũi, chi tiết nhỏ trên ảnh không bị mất khi thu nhỏ xuống 192x63.
+        </div>
+        <div class="step">
+          <b>&#9313; Mô phỏng 4 cấp độ xám (Dual-Buffer PWM):</b><br>
+          - Bằng cách chọn <b>4 Cấp độ xám</b> và xuất theo định dạng <b>Dual-Buffer PWM</b>, công cụ sẽ tách ảnh thành 2 frame bitmap (`0xDDD4` và `0xE3D4`). Khi máy tính nạp xen kẽ, bạn sẽ có đồ họa 4 cấp độ sáng xám tuyệt đẹp!
+        </div>
+        <div class="step">
+          <b>&#9314; Phím tắt tiện lợi:</b><br>
+          - <code>Ctrl+V</code>: Dán ảnh trực tiếp từ clipboard (ảnh chụp màn hình, ảnh web) hoặc dán chuỗi hex để giải mã ngay lập tức.
+        </div>
+      </div>
+      <div class="tut-footer"><button onclick="closeTutorial()">Đã hiểu</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== STATE & CONFIG =====
+const state = {
+  img: null, imgLoaded: false, mode: 'img',
+  canvasW: 192, canvasH: 63,
+  imgX: 0, imgY: 0, imgW: 192, imgH: 63,
+  ditherAlgo: 'atkinson', grayLevels: 2, ditherAmount: 1.0, edgeBoost: 30,
+  threshold: 128, invert: false, removebg: false,
+  brightness: 0, contrast: 15, exposure: 0,
+  levelsGamma: 1.0, clarity: 25, smartSharpen: 40,
+  zoom: 4, theme: 'lcd',
+  hexInv: false, hexData: null,
+  processedBuffer: null
+};
+
+const $ = id => document.getElementById(id);
+const $set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+
+const canvas = $('mainCanvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const procCanvas = document.createElement('canvas');
+const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
+let _renderTimer = null;
+let _isRendering = false;
+let _pendingRender = false;
+
+function requestRender() {
+  if (_isRendering) { _pendingRender = true; return; }
+  clearTimeout(_renderTimer);
+  _renderTimer = setTimeout(() => {
+    _isRendering = true;
+    requestAnimationFrame(() => {
+      try {
+        if (state.mode === 'img') processImage();
+        else if (state.hexData) renderHex();
+      } catch(e) {
+        console.error("Render Error: ", e);
+      } finally {
+        _isRendering = false;
+        if (_pendingRender) {
+          _pendingRender = false;
+          requestRender();
+        }
+      }
+    });
+  }, 10);
+}
+
+// ===== INIT =====
+function init() {
+  resizeCanvas();
+  updateCanvasSize();
+  fitZoom();
+  window.addEventListener('resize', fitZoom);
+  
+  let dTimer;
+  const hexIn = $('hexInput');
+  if (hexIn) {
+    hexIn.addEventListener('input', () => {
+      clearTimeout(dTimer);
+      dTimer = setTimeout(autoDetectHex, 400);
+    });
+  }
+}
+
+function resizeCanvas() {
+  canvas.width = state.canvasW;
+  canvas.height = state.canvasH;
+  procCanvas.width = state.canvasW;
+  procCanvas.height = state.canvasH;
+}
+
+function updateCanvasSize() {
+  canvas.style.width = (state.canvasW * state.zoom) + 'px';
+  canvas.style.height = (state.canvasH * state.zoom) + 'px';
+}
+
+function fitZoom() {
+  const area = $('canvasArea');
+  if (!area) return;
+  const rect = area.getBoundingClientRect();
+  const maxW = (rect.width || 800) * 0.85;
+  const maxH = (rect.height || 600) * 0.75;
+  const zoomW = maxW / state.canvasW;
+  const zoomH = maxH / state.canvasH;
+  state.zoom = Math.max(1, Math.min(Math.floor(Math.min(zoomW, zoomH)), 20));
+  updateCanvasSize();
+  $set('ciZoom', state.zoom + 'x');
+}
+
+function toggleTheme() {
+  state.theme = state.theme === 'lcd' ? 'bw' : 'lcd';
+  $('canvasWrapper').className = state.theme === 'lcd' ? 'canvas-wrapper' : 'canvas-wrapper theme-bw';
+  const btn = $('btnTheme');
+  if (btn) btn.textContent = state.theme === 'lcd' ? 'LCD Theme' : 'B&W Theme';
+  requestRender();
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  $('tabImgToHex').classList.toggle('active', mode === 'img');
+  $('tabHexToImg').classList.toggle('active', mode === 'hex');
+  $('modeImgPanel').style.display = mode === 'img' ? 'block' : 'none';
+  $('modeHexPanel').style.display = mode === 'hex' ? 'block' : 'none';
+  $set('sMode', mode === 'img' ? '→ Hex' : 'Hex →');
+  requestRender();
+}
+
+// ===== DEVICE PRESETS =====
+function applyDevicePreset() {
+  const p = $('presetSelect').value;
+  if (p === '580_full') setCanvasDims(192, 63);
+  else if (p === '580_game') setCanvasDims(192, 48);
+  else if (p === '880_full') setCanvasDims(216, 63);
+  else if (p === '128x64') setCanvasDims(128, 64);
+  else if (p === '64x64') setCanvasDims(64, 64);
+  else if (p === '32x32') setCanvasDims(32, 32);
+  else if (p === '16x16') setCanvasDims(16, 16);
+  else if (p === '8x8') setCanvasDims(8, 8);
+  if (state.img) actionFitToCanvas();
+}
+
+function setCanvasDims(w, h) {
+  state.canvasW = w;
+  state.canvasH = h;
+  $('canvasWInput').value = w;
+  $('canvasHInput').value = h;
+  resizeCanvas();
+  fitZoom();
+  requestRender();
+}
+
+function onCustomCanvas() {
+  const w = parseInt($('canvasWInput').value) || 192;
+  const h = parseInt($('canvasHInput').value) || 63;
+  setCanvasDims(w, h);
+}
+
+// ===== IMAGE LOADING & DRAG/DROP/PASTE =====
+const fileInput = $('fileInput');
+if (fileInput) {
+  fileInput.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) loadFile(f);
+    e.target.value = '';
+  });
+}
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+  document.addEventListener(eventName, e => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, false);
+});
+
+document.addEventListener('drop', e => {
+  const dt = e.dataTransfer;
+  if (dt && dt.files && dt.files.length > 0) {
+    const f = dt.files[0];
+    if (f.type.startsWith('image/')) {
+      setMode('img');
+      loadFile(f);
+    }
+  }
+});
+
+document.addEventListener('paste', e => {
+  const items = (e.clipboardData || window.clipboardData).items;
+  if (!items) return;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.type.indexOf('image') !== -1) {
+      const blob = item.getAsFile();
+      if (blob) {
+        setMode('img');
+        loadFile(blob);
+        return;
+      }
+    }
+  }
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.type === 'text/plain') {
+      item.getAsString(text => {
+        if (looksLikeHex(text)) {
+          setMode('hex');
+          $('hexInput').value = text.trim();
+          decodeHex();
+          showToast('Đã phát hiện chuỗi hex!');
+        }
+      });
+    }
+  }
+});
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      state.img = img;
+      state.imgLoaded = true;
+      $('emptyState').style.display = 'none';
+      $('canvasWrapper').style.display = 'flex';
+      actionFitToCanvas();
+      showToast('Đã nạp ảnh thành công: ' + (file.name || 'Ảnh'));
+    };
+    img.onerror = err => {
+      console.error('Image load error', err);
+      showToast('Lỗi nạp ảnh!');
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ===== HIGH QUALITY DITHERING & PROCESSING ENGINE =====
+const DitherMatrices = {
+  bayer4: [
+    [ 0,  8,  2, 10],
+    [12,  4, 14,  6],
+    [ 3, 11,  1,  9],
+    [15,  7, 13,  5]
+  ],
+  bayer8: [
+    [ 0, 32,  8, 40,  2, 34, 10, 42],
+    [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44,  4, 36, 14, 46,  6, 38],
+    [60, 28, 52, 20, 62, 30, 54, 22],
+    [ 3, 35, 11, 43,  1, 33,  9, 41],
+    [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47,  7, 39, 13, 45,  5, 37],
+    [63, 31, 55, 23, 61, 29, 53, 21]
+  ]
+};
+
+function processImage() {
+  if (!state.imgLoaded || !state.img) {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    return;
+  }
+  const w = state.canvasW, h = state.canvasH;
+  procCtx.fillStyle = '#FFFFFF';
+  procCtx.fillRect(0, 0, w, h);
+  procCtx.drawImage(state.img, state.imgX, state.imgY, state.imgW, state.imgH);
+  
+  let imageData = procCtx.getImageData(0,0,w,h);
+  let data = imageData.data;
+
+  // 1. Remove background if requested
+  if (state.removebg) applyRemoveBg(data, w, h);
+
+  // 2. Pre-adjustments: Brightness, Contrast, Gamma, Clarity, Edge Boost
+  applyEnhancements(data, w, h);
+
+  // 3. Convert to high-precision grayscale buffer (with Alpha blend support)
+  let gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    let idx = i * 4;
+    let a = data[idx+3] / 255;
+    let r = data[idx] * a + 255 * (1 - a);
+    let g = data[idx+1] * a + 255 * (1 - a);
+    let b = data[idx+2] * a + 255 * (1 - a);
+    gray[i] = r * 0.299 + g * 0.587 + b * 0.114;
+  }
+
+  // 4. Execute Multi-Algorithm Dithering Engine
+  const levels = state.grayLevels;
+  const algo = state.ditherAlgo;
+  const diffAmt = state.ditherAmount;
+  let outData = new Uint8Array(w * h);
+
+  if (algo === 'none') {
+    const th = state.threshold;
+    for (let i = 0; i < w * h; i++) {
+      outData[i] = gray[i] < th ? 0 : 255;
+    }
+  } else if (algo === 'bayer4' || algo === 'bayer8') {
+    const mat = DitherMatrices[algo];
+    const size = algo === 'bayer4' ? 4 : 8;
+    const maxVal = size * size;
+    const spread = (255 / (levels - 1));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let idx = y * w + x;
+        let v = gray[idx];
+        let factor = (mat[y % size][x % size] / maxVal - 0.5) * spread * diffAmt;
+        let adjusted = Math.min(255, Math.max(0, v + factor));
+        let step = Math.round((adjusted / 255) * (levels - 1));
+        outData[idx] = Math.round((step / (levels - 1)) * 255);
+      }
+    }
+  } else {
+    let buffer = new Float32Array(gray);
+    const stepSize = 255 / (levels - 1);
+    
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let idx = y * w + x;
+        let oldVal = Math.min(255, Math.max(0, buffer[idx]));
+        let newVal = Math.round(oldVal / stepSize) * stepSize;
+        outData[idx] = newVal;
+        let err = (oldVal - newVal) * diffAmt;
+
+        if (algo === 'atkinson') {
+          let e = err / 8;
+          if (x + 1 < w) buffer[idx + 1] += e;
+          if (x + 2 < w) buffer[idx + 2] += e;
+          if (y + 1 < h) {
+            if (x - 1 >= 0) buffer[idx + w - 1] += e;
+            buffer[idx + w] += e;
+            if (x + 1 < w) buffer[idx + w + 1] += e;
+          }
+          if (y + 2 < h) buffer[idx + w * 2] += e;
+        } else if (algo === 'floyd') {
+          if (x + 1 < w) buffer[idx + 1] += err * (7 / 16);
+          if (y + 1 < h) {
+            if (x - 1 >= 0) buffer[idx + w - 1] += err * (3 / 16);
+            buffer[idx + w] += err * (5 / 16);
+            if (x + 1 < w) buffer[idx + w + 1] += err * (1 / 16);
+          }
+        } else if (algo === 'jjn') {
+          let e = err / 48;
+          if (x + 1 < w) buffer[idx + 1] += e * 7;
+          if (x + 2 < w) buffer[idx + 2] += e * 5;
+          if (y + 1 < h) {
+            for (let dx = -2; dx <= 2; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w + dx] += e * [3, 5, 7, 5, 3][dx + 2];
+            }
+          }
+          if (y + 2 < h) {
+            for (let dx = -2; dx <= 2; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w * 2 + dx] += e * [1, 3, 5, 3, 1][dx + 2];
+            }
+          }
+        } else if (algo === 'stucki') {
+          let e = err / 42;
+          if (x + 1 < w) buffer[idx + 1] += e * 8;
+          if (x + 2 < w) buffer[idx + 2] += e * 4;
+          if (y + 1 < h) {
+            for (let dx = -2; dx <= 2; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w + dx] += e * [2, 4, 8, 4, 2][dx + 2];
+            }
+          }
+          if (y + 2 < h) {
+            for (let dx = -2; dx <= 2; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w * 2 + dx] += e * [1, 2, 4, 2, 1][dx + 2];
+            }
+          }
+        } else if (algo === 'burkes') {
+          let e = err / 32;
+          if (x + 1 < w) buffer[idx + 1] += e * 8;
+          if (x + 2 < w) buffer[idx + 2] += e * 4;
+          if (y + 1 < h) {
+            for (let dx = -2; dx <= 2; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w + dx] += e * [2, 4, 8, 4, 2][dx + 2];
+            }
+          }
+        } else if (algo === 'sierra') {
+          let e = err / 32;
+          if (x + 1 < w) buffer[idx + 1] += e * 5;
+          if (x + 2 < w) buffer[idx + 2] += e * 3;
+          if (y + 1 < h) {
+            for (let dx = -2; dx <= 2; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w + dx] += e * [2, 4, 5, 4, 2][dx + 2];
+            }
+          }
+          if (y + 2 < h) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (x + dx >= 0 && x + dx < w) buffer[idx + w * 2 + dx] += e * [2, 3, 2][dx + 1];
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Invert option
+  if (state.invert) {
+    for (let i = 0; i < outData.length; i++) outData[i] = 255 - outData[i];
+  }
+
+  state.processedBuffer = outData;
+
+  // 6. Render to Display Canvas (with LCD theme support)
+  const displayData = ctx.createImageData(w, h);
+  const px = displayData.data;
+  let onPixels = 0;
+
+  const isLcd = state.theme === 'lcd';
+  const bgR = 143, bgG = 167, bgB = 138;
+  const fgR = 17,  fgG = 34,  fgB = 17;
+
+  for (let i = 0; i < outData.length; i++) {
+    let v = outData[i];
+    let idx = i * 4;
+    if (v < 128) onPixels++;
+
+    if (isLcd) {
+      let t = v / 255;
+      px[idx]   = Math.round(fgR * (1 - t) + bgR * t);
+      px[idx+1] = Math.round(fgG * (1 - t) + bgG * t);
+      px[idx+2] = Math.round(fgB * (1 - t) + bgB * t);
+      px[idx+3] = 255;
+    } else {
+      px[idx] = px[idx+1] = px[idx+2] = v;
+      px[idx+3] = 255;
+    }
+  }
+
+  ctx.putImageData(displayData, 0, 0);
+
+  $set('sCanvas', w + 'x' + h);
+  $set('sDitherName', algo.toUpperCase());
+  $set('sShades', levels + ' Cấp');
+  $set('sPixels', onPixels);
+  $set('sTotal', w * h);
+  $set('sPct', ((onPixels / (w * h)) * 100).toFixed(1));
+  updateStatus();
+  updateCanvasInfo();
+}
+
+function applyEnhancements(data, w, h) {
+  const b = state.brightness;
+  const contrast = state.contrast;
+  const c = (259 * (contrast + 255)) / (255 * (259 - contrast));
+  const gamma = state.levelsGamma;
+  const invGamma = 1 / gamma;
+
+  for (let i = 0; i < data.length; i += 4) {
+    for (let j = 0; j < 3; j++) {
+      let val = data[i+j] + b;
+      val = c * (val - 128) + 128;
+      val = Math.max(0, Math.min(255, val));
+      if (gamma !== 1.0) {
+        val = Math.pow(val / 255, invGamma) * 255;
+      }
+      data[i+j] = val;
+    }
+  }
+
+  if (state.smartSharpen > 0 || state.edgeBoost > 0) {
+    const boost = (state.smartSharpen + state.edgeBoost) / 100;
+    const blurred = boxBlur(data, w, h, 1);
+    for (let i = 0; i < data.length; i += 4) {
+      for (let j = 0; j < 3; j++) {
+        let diff = data[i+j] - blurred[i+j];
+        data[i+j] = Math.max(0, Math.min(255, data[i+j] + diff * boost));
+      }
+    }
+  }
+}
+
+function boxBlur(data, w, h, r) {
+  let tmp = new Float32Array(data.length);
+  let out = new Uint8ClampedArray(data.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sr=0, sg=0, sb=0, cnt=0;
+      for (let dx = -r; dx <= r; dx++) {
+        let nx = x + dx;
+        if (nx >= 0 && nx < w) {
+          let idx = (y * w + nx) * 4;
+          sr += data[idx]; sg += data[idx+1]; sb += data[idx+2]; cnt++;
+        }
+      }
+      let idx = (y * w + x) * 4;
+      tmp[idx] = sr/cnt; tmp[idx+1] = sg/cnt; tmp[idx+2] = sb/cnt;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sr=0, sg=0, sb=0, cnt=0;
+      for (let dy = -r; dy <= r; dy++) {
+        let ny = y + dy;
+        if (ny >= 0 && ny < h) {
+          let idx = (ny * w + x) * 4;
+          sr += tmp[idx]; sg += tmp[idx+1]; sb += tmp[idx+2]; cnt++;
+        }
+      }
+      let idx = (y * w + x) * 4;
+      out[idx] = sr/cnt; out[idx+1] = sg/cnt; out[idx+2] = sb/cnt;
+    }
+  }
+  return out;
+}
+
+function applyRemoveBg(data, w, h) {
+  let sr=0, sg=0, sb=0;
+  const corn = [{x:0,y:0},{x:w-1,y:0},{x:0,y:h-1},{x:w-1,y:h-1}];
+  for (let c of corn) { let i = (c.y*w + c.x)*4; sr+=data[i]; sg+=data[i+1]; sb+=data[i+2]; }
+  const br=sr/4, bg=sg/4, bb=sb/4, th=35*35;
+  for (let i = 0; i < data.length; i += 4) {
+    let dr = data[i]-br, dg = data[i+1]-bg, db = data[i+2]-bb;
+    if (dr*dr + dg*dg + db*db < th) data[i] = data[i+1] = data[i+2] = 255;
+  }
+}
+
+function autoOtsuThreshold() {
+  if (!state.processedBuffer) return;
+  const hist = new Int32Array(256);
+  for (let v of state.processedBuffer) hist[v]++;
+  let total = state.processedBuffer.length;
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, wF = 0, varMax = 0, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (wB === 0) continue;
+    wF = total - wB; if (wF === 0) break;
+    sumB += t * hist[t];
+    let mB = sumB / wB;
+    let mF = (sum - sumB) / wF;
+    let varBetween = wB * wF * (mB - mF) * (mB - mF);
+    if (varBetween > varMax) { varMax = varBetween; threshold = t; }
+  }
+  state.threshold = threshold;
+  $('threshold').value = threshold;
+  $set('thresholdVal', threshold);
+  onAdj();
+  showToast('Đã tính ngưỡng tối ưu Otsu: ' + threshold);
+}
+
+// ===== HEX DECODE & ENCODE =====
+function looksLikeHex(text) {
+  const cleaned = text.trim().replace(/[\s,;\n\r0x]+/g, ' ');
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length < 4) return false;
+  let hexCount = 0;
+  for (const p of parts) if (/^[0-9A-Fa-f]{1,2}$/i.test(p)) hexCount++;
+  return hexCount >= parts.length * 0.75;
+}
+
+function autoDetectHex() { if (looksLikeHex($('hexInput').value)) decodeHex(); }
+
+function decodeHex() {
+  const text = $('hexInput').value.trim();
+  if (!text) { showToast('Chưa có hex!'); return; }
+  const matches = text.match(/[0-9A-Fa-f]{2}/g);
+  if (!matches || matches.length < 4) { showToast('Không tìm thấy byte hex hợp lệ!'); return; }
+  
+  const bytes = new Uint8Array(matches.map(h => parseInt(h, 16)));
+  state.hexData = bytes;
+  
+  let w = parseInt($('hexW').value) || 192;
+  let h = parseInt($('hexH').value) || 63;
+  let bpr = Math.ceil(w / 8);
+  if (bytes.length % bpr === 0) {
+    h = bytes.length / bpr;
+    $('hexH').value = h;
+  }
+  requestRender();
+  showToast('Đã dịch ' + bytes.length + ' bytes (' + w + 'x' + h + ')');
+}
+
+function renderHex() {
+  if (!state.hexData) return;
+  const w = parseInt($('hexW').value) || 192;
+  const h = parseInt($('hexH').value) || 63;
+  const bpr = Math.ceil(w / 8);
+
+  state.canvasW = w; state.canvasH = h;
+  canvas.width = w; canvas.height = h; procCanvas.width = w; procCanvas.height = h;
+
+  const imgData = ctx.createImageData(w, h);
+  const px = imgData.data;
+  const inv = state.hexInv;
+  let onPx = 0;
+
+  const isLcd = state.theme === 'lcd';
+  const bgR = 143, bgG = 167, bgB = 138;
+  const fgR = 17,  fgG = 34,  fgB = 17;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const byteIdx = y * bpr + Math.floor(x / 8);
+      let bitVal = 0;
+      if (byteIdx < state.hexData.length) {
+        bitVal = (state.hexData[byteIdx] >> (7 - (x % 8))) & 1;
+      }
+      
+      let isLit = bitVal === 1;
+      if (inv) isLit = !isLit;
+      if (isLit) onPx++;
+
+      const idx = (y * w + x) * 4;
+      if (isLcd) {
+        px[idx]   = isLit ? fgR : bgR;
+        px[idx+1] = isLit ? fgG : bgG;
+        px[idx+2] = isLit ? fgB : bgB;
+        px[idx+3] = 255;
+      } else {
+        let v = isLit ? 0 : 255;
+        px[idx] = px[idx+1] = px[idx+2] = v;
+        px[idx+3] = 255;
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  $set('sCanvas', w + 'x' + h);
+  $set('sPixels', onPx);
+  $set('sTotal', w * h);
+  $set('sPct', ((onPx / (w * h)) * 100).toFixed(1));
+  $set('hexStats', state.hexData.length + ' bytes | ' + bpr + ' bytes/row | ' + h + ' rows');
+  updateCanvasSize(); fitZoom(); updateStatus();
+  $('emptyState').style.display = 'none'; $('canvasWrapper').style.display = 'flex';
+}
+
+function onHexChange() { if (state.hexData) decodeHex(); }
+function toggleHexInv() {
+  state.hexInv = !state.hexInv;
+  $('toggleHexInv').classList.toggle('on');
+  $set('hexInvLabel', state.hexInv ? 'ON' : 'OFF');
+  if (state.hexData) renderHex();
+}
+function clearHex() {
+  $('hexInput').value = ''; state.hexData = null;
+  $set('hexStats', 'Chưa có dữ liệu');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  $('canvasWrapper').style.display = 'none'; $('emptyState').style.display = 'flex';
+}
+
+// ===== EXPORT FORMATS =====
+function actionExport() {
+  if (!state.imgLoaded) { showToast('Chưa có ảnh!'); return; }
+  processImage();
+  renderExportFormat();
+  $('hexOutput').style.display = 'block';
+}
+
+function renderExportFormat() {
+  const w = state.canvasW, h = state.canvasH;
+  const raw = state.processedBuffer;
+  if (!raw) return;
+  const fmt = $('exportFormat').value;
+  const bpr = Math.ceil(w / 8);
+
+  if (fmt === 'casio_dual_pwm') {
+    const frame1 = [];
+    const frame2 = [];
+    for (let y = 0; y < h; y++) {
+      const b1 = [], b2 = [];
+      for (let bx = 0; bx < bpr; bx++) {
+        let byte1 = 0, byte2 = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          let px = bx * 8 + bit;
+          let v = px < w ? raw[y * w + px] : 255;
+          if (v < 64) { byte1 |= (1 << (7 - bit)); byte2 |= (1 << (7 - bit)); }
+          else if (v < 128) { byte1 |= (1 << (7 - bit)); }
+          else if (v < 192) { byte2 |= (1 << (7 - bit)); }
+        }
+        b1.push(byte1.toString(16).toUpperCase().padStart(2, '0'));
+        b2.push(byte2.toString(16).toUpperCase().padStart(2, '0'));
+      }
+      frame1.push(b1.join(' '));
+      frame2.push(b2.join(' '));
+    }
+    let res = "=== FRAME 1 (Buffer 0xDDD4 - " + (h * bpr) + " bytes) ===\n" + frame1.join('\n') + "\n\n";
+    res += "=== FRAME 2 (Buffer 0xE3D4 - " + (h * bpr) + " bytes) ===\n" + frame2.join('\n');
+    $('hexContent').value = res;
+    return;
+  }
+
+  const rows = [];
+  const hexBytes = [];
+  for (let y = 0; y < h; y++) {
+    const rowBytes = [];
+    for (let bx = 0; bx < bpr; bx++) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        let px = bx * 8 + bit;
+        let isWhite = (px >= w) || (raw[y * w + px] >= 128);
+        if (isWhite) byte |= (1 << (7 - bit));
+      }
+      let hexStr = byte.toString(16).toUpperCase().padStart(2, '0');
+      rowBytes.push(hexStr);
+      hexBytes.push(hexStr);
+    }
+    rows.push(rowBytes.join(' '));
+  }
+
+  if (fmt === 'casio_rop_program') {
+    let asm = "# File ROP ASM tu dong ve anh len man hinh Casio fx-580VN X\n";
+    asm += "org 0xd730\n\nhome:\n    setlr\n    setsfr\n    buffer_clear\n";
+    asm += "    # Chep " + hexBytes.length + " bytes tu RAM vao VRAM 0xDDD4\n";
+    asm += "    qr8 = 0xDDD4, adr_of [+4784] img_bitmap, 0x" + hexBytes.length.toString(16).toUpperCase().padStart(4, '0') + ", 0x3030\n";
+    asm += "    call 10F20\n";
+    asm += "    render.ddd4\n\n";
+    asm += "loop:\n    delay\n    goto loop\n\n";
+    asm += "img_bitmap:\n";
+    asm += rows.map(r => "    hex " + r).join('\n');
+    $('hexContent').value = asm;
+  } else if (fmt === 'casio_csc_program') {
+    let csc = "// Chuong trinh Casio Script (.csc) tu dong ve anh len man hinh\n";
+    csc += "model 580vnx;\n";
+    csc += "opn [E9E0];\n\n";
+    csc += "csc main() {\n";
+    csc += "    screen_del();\n";
+    csc += "    // Ve truc tiep bitmap len VRAM\n";
+    csc += "    asm {\n";
+    csc += "        \"qr8 = 0xDDD4, adr_of [+4784] img_bitmap, 0x" + hexBytes.length.toString(16).toUpperCase().padStart(4, '0') + ", 0x3030\"\n";
+    csc += "        \"call 10F20\"\n";
+    csc += "        \"render.ddd4\"\n";
+    csc += "    }\n";
+    csc += "    while (1) {\n";
+    csc += "        delay(1000);\n";
+    csc += "    }\n";
+    csc += "}\n\n";
+    csc += "// Du lieu Bitmap:\n/*\n";
+    csc += rows.map(r => "hex " + r).join('\n') + "\n*/";
+    $('hexContent').value = csc;
+  } else if (fmt === 'hex_rows') {
+    $('hexContent').value = rows.join('\n');
+  } else if (fmt === 'hex_single') {
+    $('hexContent').value = hexBytes.join(' ');
+  } else if (fmt === 'asm_rop') {
+    $('hexContent').value = rows.map(r => "hex " + r).join('\n');
+  } else if (fmt === 'c_array') {
+    let code = "// Kích thước: " + w + "x" + h + " (" + hexBytes.length + " bytes)\n";
+    code += "const uint8_t bitmap_" + w + "x" + h + "[" + hexBytes.length + "] = {\n";
+    code += rows.map(r => "    " + r.split(' ').map(b => "0x" + b).join(', ') + ",").join('\n');
+    code += "\n};";
+    $('hexContent').value = code;
+  }
+}
+
+function closeHex(){ $('hexOutput').style.display = 'none'; }
+function copyHex(){
+  const t = $('hexContent').value;
+  navigator.clipboard.writeText(t).then(() => showToast('Đã sao chép vào Clipboard!'));
+}
+function downloadHex(){
+  const t = $('hexContent').value;
+  const b = new Blob([t], {type:'text/plain'});
+  const u = URL.createObjectURL(b);
+  const a = document.createElement('a');
+  a.href = u; a.download = 'casio_bitmap_' + state.canvasW + 'x' + state.canvasH + '.txt';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(u); }, 100);
+}
+
+// ===== UI ADJUSTMENTS =====
+function onAdj() {
+  state.ditherAlgo = $('ditherAlgo').value;
+  state.grayLevels = parseInt($('grayLevels').value) || 2;
+  state.ditherAmount = (parseInt($('ditherAmount').value) || 100) / 100;
+  state.edgeBoost = parseInt($('edgeBoost').value) || 0;
+  state.threshold = parseInt($('threshold').value) || 128;
+  state.brightness = parseInt($('brightness').value) || 0;
+  state.contrast = parseInt($('contrast').value) || 0;
+  state.exposure = parseFloat($('exposure').value) || 0;
+  state.levelsGamma = parseFloat($('levelsGamma').value) || 1.0;
+  state.clarity = parseInt($('clarity').value) || 0;
+  state.smartSharpen = parseInt($('smartSharpen').value) || 0;
+
+  $set('ditherAmountVal', Math.round(state.ditherAmount * 100) + '%');
+  $set('edgeBoostVal', state.edgeBoost + '%');
+  $set('thresholdVal', state.threshold);
+  $set('brightnessVal', state.brightness);
+  $set('contrastVal', state.contrast);
+  $set('exposureVal', state.exposure.toFixed(1));
+  $set('levelsGammaVal', state.levelsGamma.toFixed(1));
+  $set('clarityVal', state.clarity);
+  $set('smartSharpenVal', state.smartSharpen);
+
+  requestRender();
+}
+
+function toggleChip(el, key){
+  el.classList.toggle('active');
+  state[key] = el.classList.contains('active');
+  requestRender();
+}
+function toggleRemovebg(){
+  state.removebg = !state.removebg;
+  $('toggleRemovebg').classList.toggle('on');
+  $set('removebgLabel', state.removebg ? 'ON' : 'OFF');
+  requestRender();
+}
+
+function actionMove(){
+  state.imgX = parseInt($('moveX').value) || 0;
+  state.imgY = parseInt($('moveY').value) || 0;
+  requestRender();
+}
+function actionCenter(){
+  state.imgX = Math.floor((state.canvasW - state.imgW) / 2);
+  state.imgY = Math.floor((state.canvasH - state.imgH) / 2);
+  $('moveX').value = state.imgX;
+  $('moveY').value = state.imgY;
+  requestRender();
+}
+function actionTL(){ state.imgX=0; state.imgY=0; $('moveX').value=0; $('moveY').value=0; requestRender(); }
+function actionTR(){ state.imgX=state.canvasW-state.imgW; state.imgY=0; $('moveX').value=state.imgX; $('moveY').value=0; requestRender(); }
+function actionBL(){ state.imgX=0; state.imgY=state.canvasH-state.imgH; $('moveX').value=0; $('moveY').value=state.imgY; requestRender(); }
+function actionBR(){ state.imgX=state.canvasW-state.imgW; state.imgY=state.canvasH-state.imgH; $('moveX').value=state.imgX; $('moveY').value=state.imgY; requestRender(); }
+function actionSize(){
+  state.imgW = parseInt($('sizeW').value) || 1;
+  state.imgH = parseInt($('sizeH').value) || 1;
+  requestRender();
+}
+function actionFitToCanvas(){
+  if(!state.img) return;
+  const nw = state.img.naturalWidth || state.img.width || state.canvasW;
+  const nh = state.img.naturalHeight || state.img.height || state.canvasH;
+  const a = nw / nh;
+  const ca = state.canvasW / state.canvasH;
+  if (a > ca) {
+    state.imgW = state.canvasW;
+    state.imgH = Math.max(1, Math.round(state.canvasW / a));
+  } else {
+    state.imgH = state.canvasH;
+    state.imgW = Math.max(1, Math.round(state.canvasH * a));
+  }
+  $('sizeW').value = state.imgW;
+  $('sizeH').value = state.imgH;
+  actionCenter();
+}
+function actionOriginalSize(){
+  if(!state.img) return;
+  state.imgW = state.img.naturalWidth || state.canvasW;
+  state.imgH = state.img.naturalHeight || state.canvasH;
+  $('sizeW').value = state.imgW;
+  $('sizeH').value = state.imgH;
+  actionCenter();
+}
+
+function actionReset() {
+  state.ditherAlgo = 'atkinson';
+  state.grayLevels = 2;
+  state.ditherAmount = 1.0;
+  state.edgeBoost = 30;
+  state.threshold = 128;
+  state.brightness = 0;
+  state.contrast = 15;
+  state.exposure = 0;
+  state.levelsGamma = 1.0;
+  state.clarity = 25;
+  state.smartSharpen = 40;
+  state.removebg = false;
+  state.invert = false;
+
+  $('ditherAlgo').value = 'atkinson';
+  $('grayLevels').value = '2';
+  $('ditherAmount').value = 100;
+  $('edgeBoost').value = 30;
+  $('threshold').value = 128;
+  $('brightness').value = 0;
+  $('contrast').value = 15;
+  $('exposure').value = 0;
+  $('levelsGamma').value = 1.0;
+  $('clarity').value = 25;
+  $('smartSharpen').value = 40;
+  $('chipInvert').classList.remove('active');
+  $('toggleRemovebg').classList.remove('on');
+  $set('removebgLabel', 'OFF');
+  onAdj();
+  showToast('Đã đặt lại cấu hình mặc định sắc nét!');
+}
+
+function actionExit() {
+  if (confirm('Xóa ảnh hiện tại?')) {
+    closeHex();
+    state.img = null;
+    state.imgLoaded = false;
+    $('canvasWrapper').style.display = 'none';
+    $('emptyState').style.display = 'flex';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    updateStatus();
+  }
+}
+
+function zoomIn() { state.zoom = Math.min(state.zoom * 1.5, 20); updateCanvasSize(); $set('ciZoom', state.zoom.toFixed(1) + 'x'); }
+function zoomOut() { state.zoom = Math.max(state.zoom / 1.5, 1); updateCanvasSize(); $set('ciZoom', state.zoom.toFixed(1) + 'x'); }
+function zoomReset() { state.zoom = 1; updateCanvasSize(); $set('ciZoom', '1x'); }
+
+function updateStatus() {
+  $set('sCanvas', state.canvasW + 'x' + state.canvasH);
+  $set('sImg', state.imgLoaded ? state.imgW + 'x' + state.imgH : '--');
+  $set('sPos', '(' + state.imgX + ',' + state.imgY + ')');
+  $set('sInvBadge', state.mode === 'hex' ? (state.hexInv ? 'Invert: ✅' : 'Invert: ❌') : (state.invert ? 'Invert: ✅' : 'Invert: ❌'));
+}
+
+function updateCanvasInfo() {
+  $set('ciCanvas', state.canvasW + 'x' + state.canvasH);
+  $set('ciImg', state.imgLoaded ? state.imgW + 'x' + state.imgH : (state.hexData ? state.canvasW + 'x' + state.canvasH : '--'));
+  $set('ciPos', '(' + state.imgX + ',' + state.imgY + ')');
+}
+
+function toggleSection(el){
+  el.classList.toggle('collapsed');
+  el.nextElementSibling.classList.toggle('hidden');
+}
+
+function showToast(msg){
+  const t = $('toast');
+  if (!t) return;
+  t.innerHTML = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function showTutorial(){ $('tutorialOverlay').style.display = 'block'; }
+function closeTutorial(){ $('tutorialOverlay').style.display = 'none'; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeHex(); closeTutorial(); } });
+
+init();
+</script>
+</body>
+</html>

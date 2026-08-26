@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROP Decompiler · SH-3</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&family=Cinzel+Decorative:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#030303;--fg:#e2e8f0;--white:#fff;--gray:#888;--card-bg:rgba(15,15,20,.4);--dark:#111;--font:'JetBrains Mono',monospace;--font2:'Cinzel Decorative',serif}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--black)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+nav{background:rgba(15,15,20,.6);color:var(--fg);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,.06)}
+.nav-logo{font-family:var(--font2);font-size:.65rem;letter-spacing:.2em;color:var(--fg)}
+.nav-logo span{color:var(--gray)}
+.nav-back{color:var(--gray);text-decoration:none;font-size:.55rem;letter-spacing:.12em;padding:4px 10px;border:1px solid rgba(255,255,255,.15);border-radius:3px;transition:all .3s}
+.nav-back:hover{color:var(--white);border-color:var(--white)}
+.hero{padding:50px 24px 30px;text-align:center;border-bottom:1px solid rgba(255,255,255,.06)}
+.hero-title{font-family:var(--font2);font-size:1.1rem;letter-spacing:.12em;margin-bottom:4px;color:var(--fg)}
+.hero-sub{font-size:.55rem;letter-spacing:.2em;opacity:.5;text-transform:uppercase}
+.tool-area{flex:1;padding:24px;max-width:900px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:16px}
+.input-group{display:flex;flex-direction:column;gap:6px}
+.input-group label{font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.4;color:var(--gray)}
+textarea{width:100%;min-height:120px;background:var(--dark);color:#0f0;border:1px solid #222;border-radius:6px;padding:12px;font-family:var(--font);font-size:.75rem;line-height:1.5;resize:vertical;outline:none}
+textarea:focus{border-color:rgba(255,255,255,.3)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{background:transparent;color:var(--fg);border:1px solid rgba(255,255,255,.2);padding:8px 18px;font-family:var(--font);font-size:.65rem;letter-spacing:.1em;cursor:pointer;border-radius:4px;transition:all .3s;font-weight:700}
+.btn:hover{background:rgba(255,255,255,.08);border-color:var(--white)}
+.btn-dark{background:rgba(255,255,255,.05);color:var(--gray);border:1px solid rgba(255,255,255,.1)}
+.btn-dark:hover{background:rgba(255,255,255,.1);border-color:var(--gray)}
+.output-area{background:var(--dark);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:12px;min-height:200px;font-family:var(--font);font-size:.7rem;line-height:1.6;white-space:pre-wrap;color:#0f0;overflow:auto}
+.stats{font-size:.55rem;color:var(--gray);margin-top:4px;opacity:.6}
+.asm-line{transition:background .15s;padding:0 4px;border-radius:2px}
+.asm-line:hover{background:rgba(255,255,255,.05)}
+.asm-addr{color:var(--gray)}
+.asm-opcode{color:#0f0}
+.asm-gadget{color:#0ff}
+.asm-comment{color:#555;font-style:italic}
+@media(max-width:600px){.tool-area{padding:16px}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo"><span>✦</span> ROP Decompiler</div>
+  <a class="nav-back" href="/">← Back</a>
+</nav>
+
+<div class="hero">
+  <div class="hero-title">⚡ ROP Decompiler</div>
+  <div class="hero-sub">Hex → Assembly SH-3 / nX-U16</div>
+</div>
+
+<div class="tool-area">
+  <div class="input-group">
+    <label>Hex Input</label>
+    <textarea id="hexInput" placeholder="Dán hex vào đây...&#10;VD: FD 24 30 30 0D 24 30 30&#10;hoặc: FD2430300D243030"></textarea>
+  </div>
+  <div class="btn-row">
+    <button class="btn" onclick="decompile()">▶ Decompile</button>
+    <button class="btn btn-dark" onclick="clearAll()">✕ Clear</button>
+    <span class="stats" id="stats"></span>
+  </div>
+  <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.6;margin-top:8px">Output</label>
+  <div class="output-area" id="output">Nhập hex và nhấn "Decompile"...</div>
+</div>
+
+<script>
+// ===== GADGET MAP (SH-3 / Casio) =====
+const GADGET_MAP = {
+  0x09fa8:"setlr",0x308d0:"setlr_pc",0x0a05c:"DI,RT",
+  0x23f9e:"calc_checksum_set_f004",0x23fa6:"calc_checksum_no_set_f004",
+  0x23fad:"calc_checksum_0",0x23fc0:"calc_checksum_1",0x23fd4:"calc_checksum_2",
+  0x23fea:"calc_checksum_3",0x23f21:"pr_checksum",0x09ca0:"[er8]+=er2,pop xr8",
+  0x2702e:"sp=er14,pop er14,rt",0x12da6:"sp=er14,pop qr8",
+  0x23f82:"sp=er14,pop qr8,pop qr0",0x20d60:"sp=er14,pop er14",
+  0x21f74:"sp=er6,pop er8",0x09820:"sp=er14,pop xr12",0x13aac:"sp=er14,pop qr8,pop er6",
+  0x0ac34:"er14=sp,rt",0x0a8a8:"nop",0x13b66:"er0+=er0,er0+=er2,er8=[er0]",
+  0x13b9a:"er0+=er0,er2+=er0,er0=[er2]",0x1ec0c:"pop ea",0x27030:"pop er14,rt",
+  0x13332:"pop er0,rt",0x18974:"pop er2",0x250a6:"pop er4",0x0a8a6:"pop er8",
+  0x16eca:"pop er12,rt",0x17bda:"pop qr0",0x12da8:"pop qr8",0x177da:"pop r0",
+  0x1844a:"pop r8",0x1622e:"pop xr0",0x1d040:"pop xr4",0x183a6:"pop xr8",
+  0x0d516:"pop er10",0x0d04c:"pop r12",0x12602:"pop er0",0x21636:"pop er12",
+  0x15c78:"pop er14",0x13ab0:"pop er6",0x1dcf6:"pop er6,rt",0x20730:"pop xr12",
+  0x16d88:"pop er4,rt",0x16d7c:"pop er8,rt",0x17072:"pop qr0,rt",0x14c50:"pop qr8,rt",
+  0x15fc0:"pop r4",0x16210:"pop r4,rt",0x14c98:"pop r9",0x10e5a:"pop xr12,rt",
+  0x1d972:"pop xr4,rt",0x0e5e2:"pop xr8,rt",0x093b8:"pop er2,pop er8,er0=er2,rt",
+  0x1893a:"pop er0,pop er4",0x16754:"pop er4,pop er8",0x201f6:"pop er4,pop er12,pop r9",
+  0x14bd8:"er0+=er4,rt",0x13b80:"er4+=er0,r8=r8,rt",0x21ba8:"er0+=er8,rt",
+  0x21bae:"er2+=er8,rt",0x2fa0c:"er0+=er2,rt",0x16078:"er0+=1,rt",
+  0x09ce4:"r0+=1,rt",0x14fcc:"er0+=er6,er10=er0,rt",0x20838:"and r0,0f",
+  0x24008:"er6=er0,er0=er8,pop qr8",0x16170:"er8=er0",0x0ea70:"er2=er0,er0=er2,pop er8,rt",
+  0x14bd6:"er2=er0,er0+=er4,rt",0x0bf30:"er0=er2,rt",0x2470a:"er0=er4,pop er4",
+  0x2f786:"er0=er8,pop er8,rt",0x0a246:"er0=er8,pop er8",0x15386:"er0=er8",
+  0x1edea:"er0=er6,pop er8,pop xr4,rt",0x28c86:"er2=er0,r0=r4,r1=0,pop xr4,rt",
+  0x2ffc0:"r0=r5,pop er4",0x1abb0:"r0=r2=0",0x1abb2:"r0=r2",0x15fde:"r2=r0,pop er0",
+  0x164e4:"r2=r0,pop r6,pop er12",0x177b4:"r2=0,r7=4",0x1ca8a:"r0=0",
+  0x1DD54:"r0=0,rt",0x1DD58:"r0=1,rt",0x18978:"r0=0,pop er2",0x2ac30:"r1=0,rt",
+  0x16df2:"r5=0,rt",0x17b32:"er14=er0,pop xr0",0x0ac7c:"er0=er12,pop er12,rt",
+  0x13916:"er10=er2,rt",0x20b52:"er0=er10,pop xr8",0x1e60c:"er0=1,rt",
+  0x180d2:"er2=0,er4=0,er6=0,er8=1,rt",0x09caa:"er2=0,r0=2,[er8]=er2,pop xr8",
+  0x0a88a:"er2=1,r0=r2,rt",0x09c9e:"r0=0,[er8]+=er2,pop xr8",
+  0x27e7c:"r2=1,r0=r2,pop er4,pop er8,rt",0x27e92:"r0=r1,rt",
+  0x14fce:"er10=er0,rt",0x283fe:"er2=0,er0=er2,pop er8",0x140e4:"er0=er6,er2=er12",
+  0x16e18:"r4=0",0x0eda0:"er0=0,rt",0x16d9a:"[er2]=er0,r2=0,pop er4,rt",
+  0x139d8:"[er0]=er2,rt",0x208b2:"[er0]=r2,rt",0x203D2:"[er0]=r2",
+  0x176d4:"[er2]=r0,r2=0",0x09ca4:"[er8]=er2,pop xr8",0x13330:"[er4]=er0,pop er0,rt",
+  0x1a588:"[ea]=qr0",0x22226:"[er12]=er14,pop xr4,pop qr8",0x1332a:"[er4]+=1,rt",
+  0x13336:"[er4]-=1,rt",0x19e5a:"er8=[ea+],rt",0x16614:"[er2]=r0,r0=0",
+  0x16d7a:"er4=[er8],pop er8,rt",0x13b9e:"er0=[er2],r2=9,rt",0x13b6a:"er8=[er0],rt",
+  0x09e4a:"r0=[er2]",0x18274:"r0=[er0]",0x298dc:"er0=[er0],pop xr8,rt",
+  0x09fdc:"r0=[ea],rt",0x21f72:"sp=[er8],pop er8",0x1c2c0:"qr0=[ea],lea D002H,[ea]=qr0",
+  0x1c64a:"er6=[ea]",0x09e8a:"er0-=er2,rt",0x29a40:"er0-=er12,pop er8,pop er12,rt",
+  0x09e98:"r0-=1,rt",0x0ac5a:"r0-=r8,pop er8,rt",0x122d4:"or r0,r1",0x1a5c2:"or qr0,qr8",
+  0x20830:"r0>>4,rt",0x1bb28:"qr0>>4,rt",0x1bb5c:"r0<<4,rt",0x1bb70:"r1<<4,rt",
+  0x1bb5a:"er0<<4,rt",0x1bb56:"xr0<<4,rt",0x1bb4e:"qr0<<4,rt",
+  0x0c790:"er0-er2_gt,r0=0|r0=1,rt",0x09ae6:"er0-er2_eq,r0=1|r0=0,rt",
+  0x0c7a8:"er2-er0_gt,r0=0|r0=1,rt",0x2abda:"er0-er2_le,er0=er2,rt",
+  0x297e2:"er8-er0_lt,pop xr8",0x091ec:"r0-0_lt,rt",0x091f4:"r1-0_lt,rt",
+  0x14bd4:"er0*=r2,er2=er0,er0+=er4,rt",0x14fca:"er0*=r2,er0+=er6,er10=er0,rt",
+  0x28C54:"er0/=r2,rt",0x160c2:"sp+=20",0x162d4:"sp+=10",0x168f0:"sp+=2",
+  0x1d3c8:"sp+=4",0x09932:"sp+=6,pop qr8",0x13184:"sp+=50,pop qr8",
+  0x131f6:"sp+=20,pop qr8",0x13320:"sp+=30,pop qr8",0x15c76:"sp+=30,pop er14",
+  0x1d3f2:"sp+=2,r0=0",0x1d798:"sp+=20,pop xr12",0x21634:"sp+=10,pop er12",
+  0x21b9c:"sp+=60,pop xr8",0x284ac:"sp+=4,pop xr8",0x08f74:"sp+=64,pop er6,pop qr8",
+  0x098ec:"sp+=4,pop qr8,pop xr4",0x13412:"sp+=40,pop qr8,pop xr4",
+  0x138a6:"sp+=60,pop qr8,pop xr4",0x18266:"sp+=50,pop qr8,pop xr4",
+  0x193a0:"sp+=50,pop xr4,pop qr8",0x202b0:"sp+=120,pop qr8,pop xr4",
+  0x20660:"sp+=2,pop xr4,pop qr8",0x21b9a:"sp+=120,pop xr8",
+  0x26b12:"sp+=2,r0=1,pop er8",0x2122a:"sp+=32,r2=r0,pop xr8",
+  0x18614:"?r0=00",0x33030:"brk",0x0d71c:"[ea]+=1,r0=3",0x2c81e:"[ea]-=1,pop xr4",
+  0x24836:"B LEAVE",0x09450:"BL memcpy,pop er0",0x203CC:"BL strcpy",
+  0x203E0:"BL strcat",0x09D3A:"BL memset,pop er2",0x23CAC:"BL delay,pop xr0",
+  0x20C40:"BL line_print",0x23F62:"BL printline",0x24004:"BL hex_byte,er6=er0,er0=er8,pop qr8",
+  0x20A50:"BL smart_strcpy,pop er8",0x0A052:"BL zero_KO",0x28AC2:"BL line_draw",
+  0x09AD4:"BL render.ddd4",0x2B2BA:"memcpy_auto_jmp",0x08f80:"line_print",
+  0x25c1c:"getkeycode",0x09E96:"[ea+]=r0,r0-=1,bne",0x09C20:"cmp_ea",
+  0x17922:"calc_func",0x16082:"cvt_hex_1",0x160f8:"cvt_hex_2",
+  0x10f20:"memcpy_length_rn/8",0x1700e:"memcpy_length_rn/2,pop qr0",0x13324:"pop pc",
+  0x0E5C8:"strcpy",0x2EDA0:"strcat",0x26FFA:"memcpy",0x0A8AA:"memmove",
+  0x29A2C:"strlen",0x1EB94:"memset",0x203C2:"smart_strcpy",0x203D6:"smart_strcat",
+  0x203B8:"smart_strlen_n",0x2086C:"basen_base_print",0x23DCC:"smallprint",
+  0x08F7C:"line_print.col_0",0x08F7E:"line_print",0x23DC8:"printline",
+  0x09470:"render.e3d4",0x0947C:"render.ddd4",0x09848:"render_bitmap",
+  0x09D34:"memzero",0x26086:"reset_routine",0x24BD6:"get_string_constant",
+  0x08C0C:"fill_screen",0x08F02:"str_decompress_print",0x09F3C:"delay",
+  0x0A1CE:"_start",0x293D8:"main",0x09440:"buf1_to_buf2",0x09458:"buf2_to_buf1",
+  0x2AB26:"byte_strlen_n",0x23C4C:"diagnostic_mode",0x0ACB6:"f_0ACB6",
+  0x0AD92:"diagnostic_wait_key",0x0E826:"check_any_key_pressed__",0x23CB4:"diagnostic",
+  0x24344:"diag_scr_888_ws",0x23DD6:"diag_scr_fill_ws",0x23DDA:"waitshift_striped",
+  0x23DDE:"waitshift",0x23DE4:"diag_scr_ckb1_ws",0x23E40:"diag_scr_ckb2_ws",
+  0x23E6A:"diag_scr_version",0x23E92:"diag_print_ver",0x23EEE:"diag_checksum",
+  0x23F8A:"store_reg_to_stack",0x23EC8:"diag_print_pd",0x23F9A:"diag_calc_checksum",
+  0x09A24:"pd_value",0x24010:"hex_byte",0x16EAE:"byte_hex",0x09938:"hex_to_dec",
+  0x2541A:"diag_serial_num",0x10E5E:"get_serial_num",0x23D5A:"diag_check_key",
+  0x2641A:"diag_contrast",0x2C58A:"diag_8_keytest",0x1F24E:"getscancode",
+  0x2F5EA:"getkey",0x25C1A:"getkeycode",0x29892:"cvt_key",0x0A0E0:"setsfr",
+  0x19808:"byte_to_bcd",0x19832:"bcd_to_byte",0x08E62:"line_draw",0x091FC:"pixel_draw",
+  0x090D2:"draw_glyph",0x2EDC8:"line_print__call__",0x0996C:"str_decompress_print__call__",
+  0x099C2:"str_decompress_print__call1__",0x0904E:"char_print_1byte",0x09056:"char_print",
+  0x09238:"char_get_14",0x09318:"char_get_l14",0x0A16A:"zero_KO",0x09DE6:"assign_var",
+  0x08C60:"buffer_clear",0x0AC30:"ENTER",0x0AC38:"LEAVE",0x224DE:"LEAVE1",
+  0x22D66:"LEAVE2",0x13D92:"LEAVE3",0x2110A:"LEAVE4",0x1652C:"num_add",
+  0x16538:"num_sub",0x16544:"num_mul",0x16550:"num_div",0x1D24A:"num_add_1",
+  0x1D236:"num_sub_1",0x1D272:"num_mul_1",0x1D25E:"num_div_1",0x20C46:"num_output_print",
+  0x1D950:"num_fromdigit",0x1DC2E:"num_frombyte",0x1D898:"num_invalid__",
+  0x1DBE2:"num_trunc__",0x1DAF0:"num_mulxp__",0x1391A:"num_random",0x13A20:"num_randint",
+  0x139D2:"num_normalize",0x1DC8A:"num_to_byte",0x1ED58:"num_to_hex",0x279B6:"num_to_str",
+  0x1DCE4:"num_cpy",0x1D902:"num_cmp",0x16844:"num_sin",0x1684E:"num_cos",
+  0x168E4:"num_tan",0x2AD4C:"display_menu",0x093D2:"draw_byte",
+  0x2045c:"pop xr4,pop xr12",0x1c696:"[ea+] = er0",0x13622:"pop qr8",
+  0x1fcf4:"pop er4",0x09d3e:"pop er2",0x10e80:"pop ea, r6-=1_ne,call 10e6e|pop xr4",
+  0x1216a:"pop er0",0x17b34:"pop xr0",0x1622e:"pop xr0",0x08e64:"line_draw",
+  0x13344:"calc_func_verify",0x2F210:"input_func",0x2E234:"mode_calc",
+  0x1ED56:"num_to_hex",0x1A6E4:"setlr,er0 = 0,r2 = f3",0x23C90:"pop qr0",
+  0x09E68:"pop xr0",0x0E232:"er0 = er8,pop er8",0x140E6:"er2 = er12",
+  0x13AD8:"er0 = er10,bl num_cpy",0x17BFA:"er2 = er14, r1 = 3",0x09E48:"er2 += er0,r0 = [er2]",
+  0x2245C:"r1 = 0,pop er12",0x16070:"xr0 = -xr0,rt",0x17BD8:"[ea] = xr4",
+  0x17BF8:"[ea] = xr12, er2 = er14, r1 = 3",0x17CAE:"[ea+] = qr0, [ea+] = er8, rt",
+  0x17E7A:"r10 = r11",0x17E7D:"r11 = 0",0x2245A:"r0 = r12, r1 = 0, pop er12",
+  0x1DF54:"er2 = er0, er0 += er0, er0 += er2, er6 += er0",0x1DF9A:"r5 += 1",
+  0x27FCE:"r7 = 0",0x09FF8:"var_m = r0, rt",0x0A06A:"[ea+] = er0, [ea] = r0, rt",
+  0x0A07A:"[ea+] = er2, [ea] = r2, rt",0x0A0A8:"rt",0x0A0DA:"setnormal",
+  0x0A0DC:"setdelay",0x0A11C:"setcursor",0x0A562:"r0 = r4, pop er4",
+  0x0A594:"er4 += 1",0x0A598:"er8 += 1",0x0A908:"er0 = er8, pop er4, pop er12, pop xr8, sp = er14, pop er14, rt",
+  0x0A930:"r0 >> 2",0x0AA87:"r10 = r6, r9 = r0",0x0AA88:"r9 = r0",
+  0x0AA8A:"r6 += 1",0x0AC58:"r0 = r2, r0 -= r8",0x0AC7A:"er12 = 0",
+  0x0ACFA:"r6 = 0",0x0B4E0:"r5 = r0",0x0B684:"er4 = er0",0x0BDA2:"er4 = er8, er6 = er2",
+  0x0BDA5:"er6 = er2",0x0BE30:"er8 -= 1",0x0BF2E:"er2 += 1",0x1A5D0:"or r7, r15",
+  0x1A610:"[ea+] = xr4",0x28C5A:"er8 = er0, er10 = er2",0x28C5C:"er10 = er2",
+  0x272B8:"r10 = 0",0x1C64C:"qr8 = [ea]",0x279B8:"num_to_str",0x1DC8C:"num_to_byte",
+  0x1DC30:"num_frombyte"
+};
+
+const VALUE_TO_NAME = {
+  0x0180:"key_shift",0x0280:"key_alpha",0x1080:"key_menu",
+  0x0480:"key_up",0x0840:"key_down",0x0440:"key_left",0x0880:"key_right",
+  0x0140:"key_optn",0x0240:"key_calc",0x1040:"key_intg",0x2040:"key_x",
+  0x0120:"key_frac",0x0220:"key_sqrt",0x0420:"key_sqr",0x0820:"key_power",
+  0x1020:"key_logb",0x2020:"key_inx",0x0110:"key_neg",0x0210:"key_deg",
+  0x0410:"key_inv",0x0810:"key_sin",0x1010:"key_cos",0x2010:"key_tan",
+  0x0108:"key_sto",0x0208:"key_eng",0x0408:"key_lpar",0x0808:"key_rpar",
+  0x1008:"key_std",0x2008:"key_addm",0x4010:"key_0",0x0101:"key_1",
+  0x0201:"key_2",0x0401:"key_3",0x0102:"key_4",0x0202:"key_5",
+  0x0402:"key_6",0x0104:"key_7",0x0204:"key_8",0x0404:"key_9",
+  0x4008:"key_dot",0x0804:"key_del",0x1004:"key_ac",0x4001:"key_exe",
+  0x4002:"key_ans",0x4004:"key_exp",0x0801:"key_add",0x1001:"key_sub",
+  0x0802:"key_mul",0x1002:"key_div",
+  0x83DA:"adrcvtkey",0xD000:"reg0",0xD009:"reg0.9",0xD110:"modifiers",
+  0xD111:"mode",0xD112:"submode",0xD11A:"num_format",0xD11B:"num_format_i",
+  0xD11D:"angle_unit",0xD138:"draw_mode",0xD180:"input_range",
+  0xD318:"unstable_char",0xD31A:"var_m",0xD324:"var_ans",0xD32E:"var_a",
+  0xD338:"var_b",0xD342:"var_c",0xD34C:"var_d",0xD356:"var_e",
+  0xD360:"var_f",0xD36A:"var_x",0xD374:"var_y",0xD37E:"var_preans",
+  0xD388:"var_z",0xD392:"calc_history",0xD139:"current_screen_buffer",
+  0xDDD4:"screen_buffer",0xD137:"font_size",0xD113:"cursor_noflash",
+  0xDBD0:"magic_string"
+};
+
+function hexToBytes(h) {
+  let c = h.replace(/[^0-9a-fA-F]/g,'');
+  if (!c) return [];
+  if (c.length % 2) c = c.slice(0,-1);
+  let r = [];
+  for (let i = 0; i < c.length; i+=2) r.push(parseInt(c.substr(i,2),16));
+  return r;
+}
+
+function normalizeAddr(addr) {
+  if (addr === 0x09c21) return 0x09c20;
+  if (addr === 0x0947e) return 0x0947c;
+  if ((addr & 1) && GADGET_MAP[addr-1]) return addr - 1;
+  return addr;
+}
+
+function findGadget(addr) {
+  let a = normalizeAddr(addr);
+  let name = GADGET_MAP[a];
+  if (name) return { addr: a, name };
+  // try nearby
+  for (let i = 1; i <= 8; i++) {
+    if (GADGET_MAP[addr - i]) return { addr: addr - i, name: GADGET_MAP[addr - i], offset: i };
+  }
+  return null;
+}
+
+function formatAsm(bytes, startAddr) {
+  let out = [], i = 0, addr = startAddr || 0xD730;
+  while (i < bytes.length) {
+    let g = findGadget(addr);
+    if (g && !g.offset) {
+      let name = g.name;
+      let size = 4;
+      if (name.startsWith("hex ") || name.match(/^BL /)) size = 4;
+      else if (name.startsWith("pop ") && !name.includes(",")) size = 2;
+      else if (name === "nop" || name === "rt" || name === "brk") size = 2;
+      out.push(`  ${addr.toString(16).padStart(5,'0')}  ${name}`);
+      i += size;
+      addr += size;
+    } else {
+      let b = bytes[i];
+      let name = VALUE_TO_NAME[b];
+      if (name) {
+        out.push(`  ${addr.toString(16).padStart(5,'0')}  ${name}`);
+        i += 1;
+        addr += 1;
+      } else {
+        let hexW = bytes.slice(i,i+4);
+        let hexStr = hexW.map(b=>b.toString(16).padStart(2,'0')).join(' ');
+        if (hexW.length >= 4) {
+          let w = (hexW[0]|hexW[1]<<8); // little endian
+          out.push(`  ${addr.toString(16).padStart(5,'0')}  ${hexStr}  ; data/addr`);
+          i += 4; addr += 4;
+        } else if (hexW.length >= 2) {
+          let w = (hexW[0]|hexW[1]<<8);
+          let valName = VALUE_TO_NAME[w];
+          if (valName) {
+            out.push(`  ${addr.toString(16).padStart(5,'0')}  ${valName}`);
+            i += 2; addr += 2;
+          } else {
+            out.push(`  ${addr.toString(16).padStart(5,'0')}  ${hexStr}`);
+            i += hexW.length; addr += hexW.length;
+          }
+        } else {
+          out.push(`  ${addr.toString(16).padStart(5,'0')}  ${b.toString(16).padStart(2,'0')}`);
+          i += 1; addr += 1;
+        }
+      }
+    }
+  }
+  return out.join('\n');
+}
+
+function decompile() {
+  let input = document.getElementById('hexInput').value.trim();
+  if (!input) { document.getElementById('output').textContent = '❌ Nhập hex cần decompile.'; return; }
+  let bytes = hexToBytes(input);
+  if (!bytes.length) { document.getElementById('output').textContent = '❌ Hex không hợp lệ.'; return; }
+  let asm = formatAsm(bytes);
+  document.getElementById('output').textContent = asm;
+  document.getElementById('stats').textContent = `${bytes.length} bytes · ${asm.split('\n').filter(l=>l.trim()).length} instructions`;
+}
+
+function clearAll() {
+  document.getElementById('hexInput').value = '';
+  document.getElementById('output').textContent = 'Nhập hex và nhấn "Decompile"...';
+  document.getElementById('stats').textContent = '';
+}
+
+document.getElementById('hexInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.ctrlKey) decompile();
+});
+</script>
+</body>
+</html>

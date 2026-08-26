@@ -1,0 +1,45 @@
+PHẦN 1: TỔNG QUAN DỰ ÁN & UI/UX (STYLE)
+Tên Server/Website: Đạo Quán Casio
+Chủ đề (Niche): Lập trình Casio, ROP (Assembly), Reverse Engineering, Exploit.
+Style thiết kế: Monochrome (Nền Trắng - Chữ Đen), Monospace Font (JetBrains Mono hoặc Courier), viền mỏng (1px solid black), hiệu ứng hover đổi màu ngược (Invert: Nền đen - Chữ trắng). Lấy cảm hứng từ máy tính Casio thực tế (màn hình LCD đơn sắc).
+Slogan:
+We are coding "Casio"
+We are coding "ROP" (assembly)
+PHẦN 2: CẤU TRÚC CÁC TAB (PAGES)
+Tab Index (Trang chủ):
+Thiết kế giống màn hình boot của hệ điều hành hoặc LCD Casio.
+Chứa Slogan gõ chữ (Typewriter effect), giới thiệu sơ lược về Đạo Quán Casio.
+Nút Login Discord to bản ở giữa hoặc góc phải.
+Tab Tool:
+Chứa các công cụ hỗ trợ ROP: ROP Gadget Finder, Hex to Assembly Converter, Casio ROM dumper tools, Offset Calculator.
+Tab Knowledge (Kiến thức):
+Dạng Blog/Wiki thuần text (Markdown). Các bài viết về SH-3/SH-4 Architecture (thường dùng trong Casio), stack buffer overflow, v.v.
+Tab Forum (Diễn đàn):
+Nơi hỏi đáp.
+Logic: Đã đăng nhập -> Dùng Avatar/Tên Discord. Chưa đăng nhập -> Hiện popup <Nhập tên Hacker của bạn> để post bài ẩn danh (hoặc tư cách khách).
+Tab #chat-chung (Fixed Panel hoặc Tab riêng):
+Khung chat Real-time đồng bộ với Server Discord.
+PHẦN 3: KIẾN TRÚC KỸ THUẬT (Firebase + Discord Bot)
+Để làm được tính năng Chat đồng bộ Discord và Login Discord, bạn cần kết hợp 3 thành phần: Frontend (Web) + Firebase + Backend (Discord Bot / Node.js).
+1. Đăng nhập Discord qua Firebase (Ghi nhớ 30 ngày)
+Firebase không có sẵn nút "Login with Discord". Bạn phải làm theo luồng (Flow) sau:
+Bước 1: Người dùng bấm "Login Discord" -> Web chuyển hướng đến trang uỷ quyền (OAuth2) của Discord.
+Bước 2: Trả code về backend của bạn (Firebase Cloud Functions hoặc một server Node.js nhỏ).
+Bước 3: Backend lấy thông tin User (Tên, Avatar, ID) -> Tạo ra một Firebase Custom Token.
+Bước 4: Gửi Token đó về Web. Web dùng hàm signInWithCustomToken(auth, token).
+Ghi nhớ 30 ngày: Sử dụng setPersistence(auth, browserLocalPersistence). Firebase sẽ lưu phiên đăng nhập trong LocalStorage. Để ép đúng 30 ngày, bạn có thể lưu thêm 1 biến login_timestamp, nếu quá 30 ngày thì tự gọi hàm signOut().
+2. Kiến trúc Tab #chat-chung (Giao tiếp với Server Discord thật)
+Lưu ý: Discord cấm dùng tài khoản người dùng thường để làm Bot (Self-bot). Nên để user trên web chat vào Discord thật mà mang tên/avatar của họ, ta dùng phương pháp Webhook.
+Từ Web đọc Discord: Discord Bot của bạn ở trong server sẽ "nghe" mọi tin nhắn ở #chat-chung. Khi có tin mới, Bot đẩy tin đó lên Firebase Firestore/Realtime DB. Web của bạn chỉ cần onSnapshot (nghe trực tiếp) Firebase để hiển thị ra màn hình.
+Từ Web gửi lên Discord: Người dùng (đã login) gõ tin nhắn trên web -> Lưu vào Firebase -> Firebase kích hoạt Bot (hoặc webhook) -> Bot lấy Avatar và Tên của user đó, tạo một Discord Webhook bắn vào #chat-chung. Trông sẽ y hệt như người dùng đó đang nhắn trong server thật.
+Phân quyền: Nếu Firebase Auth = null (chưa login) -> Input chat bị disabled, placeholder ghi "Login via Discord to execute commands..."
+
+ác bước tiếp theo để code Back-end (Firebase thực tế)
+Tạo Project Firebase: Bật Authentication và Firestore.
+Tạo Discord Application: Vào Discord Developer Portal, tạo app, lấy Client ID và Client Secret. Thêm Bot vào server "Đạo Quán Casio" của bạn.
+Deploy Firebase Functions (Node.js):
+Tạo 1 endpoint nhận callback từ Discord OAuth.
+Tạo custom token trả về cho Front-end.
+Viết script cho Bot Discord: bot.on('messageCreate') -> Ghi vào Firestore.
+Viết trigger Firestore: Khi web chèn 1 document mới vào collections messages, báo Bot dùng Webhook bắn vào Discord.
+Hoàn thiện tab Forum: Nếu isLoggedIn == false, hiện form HTML đơn giản xin "Bí danh", sau đó post bài lên Firestore dưới dạng chữ trắng nền đen giống giao diện.

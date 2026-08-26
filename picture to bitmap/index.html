@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2B Pro - Image ⇄ Bitmap Hex</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#1c2333;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--accent:#58a6ff;--accent2:#3fb950;--danger:#f85149;--radius:8px;--font:'Segoe UI','Helvetica Neue',Arial,sans-serif;--mono:'Cascadia Code','JetBrains Mono','Fira Code',monospace}
+body{background:var(--bg);color:var(--text);font-family:var(--font);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;flex-shrink:0}
+.logo{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700}
+.logo span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.status-bar{display:flex;flex-wrap:wrap;gap:3px 8px;font-size:11px;font-family:var(--mono);color:var(--text2)}
+.status-bar .badge{background:var(--surface2);padding:1px 6px;border-radius:3px;border:1px solid var(--border);white-space:nowrap}
+.status-bar .badge.highlight{color:var(--accent2);border-color:var(--accent2)}
+.status-bar .badge.mode{color:var(--accent);border-color:var(--accent)}
+
+.layout{display:flex;flex:1;min-height:0;gap:0}
+
+.canvas-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;overflow:hidden;position:relative;min-width:0}
+.canvas-wrapper{display:flex;flex-direction:column;align-items:center;gap:6px;max-width:100%;max-height:100%}
+.canvas-wrapper canvas{display:block;image-rendering:pixelated;border:1px solid #444;border-radius:2px;background:#000;max-width:100%;max-height:calc(100vh - 200px);width:auto;height:auto}
+.canvas-info{display:flex;gap:10px;font-size:11px;font-family:var(--mono);color:var(--text2);flex-wrap:wrap;justify-content:center}
+.canvas-info b{color:var(--text)}
+.empty-state{display:flex;flex-direction:column;align-items:center;gap:10px;padding:40px 20px;color:var(--text2)}
+.empty-state .icon{font-size:48px;opacity:.3}
+.empty-state .btn-upload{background:var(--accent);color:#fff;border:none;padding:8px 20px;border-radius:var(--radius);cursor:pointer;font-size:13px;font-weight:600}
+.empty-state .btn-upload:hover{filter:brightness(1.1)}
+.empty-state input[type=file]{display:none}
+.canvas-tools{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+.canvas-tools button{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:var(--mono)}
+.canvas-tools button:hover{border-color:var(--accent)}
+
+.sidebar{width:310px;background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;padding:8px;flex-shrink:0}
+@media(max-width:800px){.sidebar{width:240px}}
+
+/* MODE TABS */
+.mode-tabs{display:flex;gap:0;margin-bottom:8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.mode-tab{flex:1;padding:6px 8px;text-align:center;font-size:11px;font-weight:600;cursor:pointer;background:var(--surface2);color:var(--text2);border:none;transition:all .15s}
+.mode-tab:not(:last-child){border-right:1px solid var(--border)}
+.mode-tab.active{background:var(--accent);color:#fff}
+
+.section{margin-bottom:8px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.section-title{background:var(--surface2);padding:5px 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none}
+.section-title .arrow{transition:transform .2s;font-size:9px}
+.section-title.collapsed .arrow{transform:rotate(-90deg)}
+.section-body{padding:6px 10px;display:flex;flex-direction:column;gap:5px}
+.section-body.hidden{display:none}
+
+.ctrl-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.ctrl-row label{font-size:10px;color:var(--text2);min-width:48px;font-weight:500;flex-shrink:0}
+.ctrl-row input[type=range]{flex:1;min-width:50px;height:3px;-webkit-appearance:none;appearance:none;background:var(--border);border-radius:2px;outline:none}
+.ctrl-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--accent)}
+.ctrl-row input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid var(--surface)}
+.ctrl-row .val{font-size:10px;font-family:var(--mono);color:var(--text);min-width:24px;text-align:right;flex-shrink:0}
+.ctrl-row input[type=number]{width:42px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:1px 3px;border-radius:3px;font-size:10px;font-family:var(--mono)}
+.ctrl-row input[type=number]:focus{border-color:var(--accent);outline:none}
+.ctrl-row .btn{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:2px 8px;border-radius:3px;cursor:pointer;font-size:10px;font-family:var(--mono)}
+.ctrl-row .btn:hover{border-color:var(--accent);background:var(--surface)}
+.ctrl-row .btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.ctrl-row .btn.danger{color:var(--danger);border-color:var(--danger)}
+.ctrl-row .btn.danger:hover{background:var(--danger);color:#fff}
+.ctrl-row .btn.green{color:var(--accent2);border-color:var(--accent2)}
+.ctrl-row .btn.green:hover{background:var(--accent2);color:#fff}
+.ctrl-row .btn-sm{padding:1px 5px;font-size:9px}
+.ctrl-divider{border:none;border-top:1px solid var(--border);margin:3px 0}
+.ctrl-hint{font-size:9px;color:var(--text2);padding:1px 0 0 52px}
+.ctrl-row .toggle{position:relative;width:28px;height:16px;background:var(--border);border-radius:8px;cursor:pointer;transition:background .2s;flex-shrink:0}
+.ctrl-row .toggle.on{background:var(--accent2)}
+.ctrl-row .toggle::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s}
+.ctrl-row .toggle.on::after{transform:translateX(12px)}
+.ctrl-row .toggle-label{font-size:10px;color:var(--text2);cursor:pointer}
+.ctrl-row .chip{background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;font-family:var(--mono)}
+.ctrl-row .chip:hover{border-color:var(--accent)}
+.ctrl-row .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+
+/* HEX INPUT */
+.hex-input-area textarea{width:100%;min-height:120px;background:var(--bg);color:var(--accent2);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;line-height:1.4;font-family:var(--mono);resize:vertical;outline:none}
+.hex-input-area textarea:focus{border-color:var(--accent)}
+.hex-stats{font-size:10px;color:var(--text2);margin-top:2px}
+
+/* HEX MODAL */
+#hexOutput{display:none}
+.hex-panel{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
+.hex-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:92vw;max-height:92vh;display:flex;flex-direction:column;min-width:300px}
+.hex-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)}
+.hex-header h3{font-size:13px}
+.hex-header button{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px}
+.hex-header button:hover{border-color:var(--accent)}
+.hex-body{padding:12px 14px;overflow:auto;flex:1}
+.hex-body textarea{width:100%;height:280px;background:var(--bg);color:var(--accent2);border:1px solid var(--border);border-radius:4px;padding:10px;font-size:12px;line-height:1.5;font-family:var(--mono);resize:vertical;outline:none}
+.hex-body textarea:focus{border-color:var(--accent)}
+.hex-footer{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.hex-footer button{background:var(--accent);color:#fff;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600}
+.hex-footer button:hover{filter:brightness(1.1)}
+.hex-footer .btn2{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+
+/* TUTORIAL */
+#tutorialOverlay{display:none}
+.tut-panel{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.tut-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);max-width:600px;max-height:85vh;display:flex;flex-direction:column}
+.tut-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.tut-header h3{font-size:14px}
+.tut-body{padding:16px;overflow-y:auto;flex:1;font-size:12px;line-height:1.6;color:var(--text)}
+.tut-body b{color:var(--accent)}
+.tut-body code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:11px;color:var(--accent2)}
+.tut-body .step{margin-bottom:10px;padding-left:8px;border-left:2px solid var(--accent)}
+.tut-footer{padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end}
+.tut-footer button{background:var(--accent);color:#fff;border:none;padding:6px 20px;border-radius:4px;cursor:pointer;font-size:12px}
+
+/* TOAST */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--accent2);color:var(--accent2);padding:8px 20px;border-radius:var(--radius);font-size:12px;font-family:var(--mono);z-index:2000;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.paste-hint{position:absolute;bottom:12px;right:16px;font-size:10px;color:var(--text2);opacity:.4}
+.paste-hint kbd{background:var(--surface2);border:1px solid var(--border);padding:1px 4px;border-radius:2px;font-size:9px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">&#9679; <span>P2B PRO</span></div>
+  <div class="status-bar" id="statusBar">
+    <span class="badge mode" id="sMode">&#8594; Hex</span>
+    <span class="badge">Canvas: <span id="sCanvas">192x63</span></span>
+    <span class="badge">&#7842nh: <span id="sImg">--</span></span>
+    <span class="badge">Pos: <span id="sPos">(0,0)</span></span>
+    <span class="badge">Threshold: <span id="sThreshold">128</span></span>
+    <span class="badge highlight">Pixels: <span id="sPixels">0</span>/<span id="sTotal">0</span> (<span id="sPct">0</span>%)</span>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="canvas-area" id="canvasArea">
+    <div class="empty-state" id="emptyState">
+      <div class="icon">&#128247;</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">P2B Pro &mdash; Image &#8660; Bitmap Hex</div>
+      <div style="font-size:11px">Kéo th&#7843; &#7843;nh | <b>Ctrl+V</b> dán &#7843;nh ho&#7863;c hex | Ch&#7885;n file</div>
+      <div style="font-size:11px;margin-top:4px">&#128161; B&#7845;m <b>H&#432;&#7899;ng d&#7851;n</b> &#7903; sidebar &#273;&#7875; xem cách dùng</div>
+      <button class="btn-upload" onclick="document.getElementById('fileInput').click()" style="margin-top:8px">Ch&#7885;n &#7843;nh</button>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    <div class="canvas-wrapper" id="canvasWrapper" style="display:none">
+      <canvas id="mainCanvas"></canvas>
+      <div class="canvas-info">
+        <span>Canvas: <b id="ciCanvas">192x63</b></span>
+        <span>&#7842nh: <b id="ciImg">--</b></span>
+        <span>Pos: <b id="ciPos">(0,0)</b></span>
+        <span>Zoom: <b id="ciZoom">1x</b></span>
+      </div>
+      <div class="canvas-tools">
+        <button onclick="zoomIn()">+</button>
+        <button onclick="zoomOut()">-</button>
+        <button onclick="zoomFit()">Fit</button>
+        <button onclick="zoomReset()">1:1</button>
+      </div>
+    </div>
+    <div class="paste-hint"><kbd>Ctrl</kbd>+<kbd>V</kbd> dán &#7843;nh / hex</div>
+  </div>
+
+  <div class="sidebar" id="sidebar">
+    <!-- MODE TABS -->
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tabImgToHex" onclick="setMode('img')">&#128247; &#7842nh &#8594; Hex</button>
+      <button class="mode-tab" id="tabHexToImg" onclick="setMode('hex')">&#128290; Hex &#8594; &#7842nh</button>
+    </div>
+
+    <!-- MODE: IMAGE TO HEX -->
+    <div id="modeImgPanel">
+    <!-- VỊ TRÍ -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">V&#7882; TRÍ <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Move</label><input type="number" id="moveX" value="0" onchange="actionMove()"><input type="number" id="moveY" value="0" onchange="actionMove()"><button class="btn btn-sm" onclick="actionMove()">&#8594;</button></div>
+        <div class="ctrl-row"><label></label><button class="btn btn-sm" onclick="actionCenter()">Center</button><button class="btn btn-sm" onclick="actionTL()">Top-L</button><button class="btn btn-sm" onclick="actionTR()">Top-R</button><button class="btn btn-sm" onclick="actionBL()">Bot-L</button><button class="btn btn-sm" onclick="actionBR()">Bot-R</button></div>
+        <div class="ctrl-row"><label>Size</label><input type="number" id="sizeW" value="192" onchange="actionSize()"><span style="color:var(--text2);font-size:10px">x</span><input type="number" id="sizeH" value="44" onchange="actionSize()"><button class="btn btn-sm" onclick="actionSize()">&#8594;</button></div>
+        <div class="ctrl-row"><label></label><button class="btn btn-sm" onclick="actionFitToCanvas()">Fit canvas</button><button class="btn btn-sm" onclick="actionOriginalSize()">Original</button></div>
+      </div>
+    </div>
+
+    <!-- ADJUSTMENTS -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">ADJUSTMENTS <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Brightness</label><input type="range" id="brightness" min="-150" max="150" value="0" oninput="onAdj()"><span class="val" id="brightnessVal">0</span></div>
+        <div class="ctrl-row"><label>Contrast</label><input type="range" id="contrast" min="-150" max="150" value="0" oninput="onAdj()"><span class="val" id="contrastVal">0</span></div>
+        <div class="ctrl-row"><label>Exposure</label><input type="range" id="exposure" min="-50" max="50" value="0" step="1" oninput="onAdj()"><span class="val" id="exposureVal">0.0</span></div>
+        <div class="ctrl-row"><label>Levels</label><input type="number" id="levelsBlack" value="0" min="0" max="255" onchange="onAdj()"><input type="number" id="levelsWhite" value="255" min="0" max="255" onchange="onAdj()"><input type="number" id="levelsGamma" value="1.0" min="0.1" max="5" step="0.1" onchange="onAdj()" style="width:46px"></div>
+        <div class="ctrl-row"><label>Clarity</label><input type="range" id="clarity" min="-100" max="100" value="0" oninput="onAdj()"><span class="val" id="clarityVal">0</span></div>
+        <div class="ctrl-row"><label>NR</label><input type="range" id="nr" min="0" max="100" value="0" oninput="onAdj()"><span class="val" id="nrVal">0</span></div>
+        <div class="ctrl-row"><label>Grain</label><input type="range" id="grain" min="0" max="100" value="0" oninput="onAdj()"><span class="val" id="grainVal">0</span></div>
+      </div>
+    </div>
+
+    <!-- FILTERS -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">FILTERS <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>SmartSharp</label><input type="range" id="smartSharpen" min="0" max="200" value="0" oninput="onAdj()"><span class="val" id="smartSharpenVal">0</span><input type="number" id="smartSharpenRadius" value="1" min="0.5" max="5" step="0.5" style="width:38px" onchange="onAdj()"></div>
+        <div class="ctrl-row"><label>FieldBlur</label><input type="range" id="fieldBlur" min="0" max="20" value="0" step="0.5" oninput="onAdj()"><span class="val" id="fieldBlurVal">0</span></div>
+        <div class="ctrl-row"><label>MotionBlur</label><input type="range" id="motionBlur" min="0" max="20" value="0" step="0.5" oninput="onAdj()"><span class="val" id="motionBlurVal">0</span><input type="number" id="motionBlurAngle" value="0" min="0" max="360" style="width:38px" onchange="onAdj()"></div>
+        <div class="ctrl-row"><label>Highpass</label><input type="range" id="highpass" min="0" max="20" value="0" step="0.5" oninput="onAdj()"><span class="val" id="highpassVal">0</span></div>
+        <div class="ctrl-row"><label></label><button class="chip" id="chipEmboss" onclick="toggleChip(this,'emboss')">Emboss</button><button class="chip" id="chipEqualize" onclick="toggleChip(this,'equalize')">Equalize</button><button class="chip" id="chipPosterize" onclick="toggleChip(this,'posterize')">Posterize</button><input type="number" id="posterizeLevel" value="4" min="2" max="20" style="width:36px" onchange="onAdj()"></div>
+        <div class="ctrl-row"><label></label><button class="chip" id="chipClahe" onclick="toggleChip(this,'clahe')">CLAHE</button><input type="number" id="claheClip" value="3" min="1" max="10" style="width:36px" onchange="onAdj()"><button class="chip" id="chipDither" onclick="toggleChip(this,'dither')">Dither</button><input type="number" id="ditherBits" value="2" min="2" max="8" step="2" style="width:36px" onchange="onAdj()"></div>
+      </div>
+    </div>
+
+    <!-- OBJECT -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">OBJECT <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Remove BG</label><div class="toggle" id="toggleRemovebg" onclick="toggleRemovebg()"></div><span class="toggle-label" id="removebgLabel">OFF</span></div>
+        <div class="ctrl-hint">Edge detection</div>
+      </div>
+    </div>
+
+    <!-- RESET & EXPORT -->
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">RESET &amp; EXPORT <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><button class="btn danger" onclick="actionReset()">Reset</button></div>
+        <hr class="ctrl-divider">
+        <div class="ctrl-row"><label>Threshold</label><input type="range" id="threshold" min="0" max="255" value="128" oninput="onAdj()"><span class="val" id="thresholdVal">128</span></div>
+        <div class="ctrl-row"><label></label><button class="chip" id="chipInvert" onclick="toggleChip(this,'invert')">Invert</button><button class="chip" id="chipSharpen" onclick="toggleChip(this,'sharpen')">Sharpen</button></div>
+        <hr class="ctrl-divider">
+        <div class="row2"><button class="btn green" onclick="actionExport()">Xem Hex</button><button class="btn" onclick="actionExportDownload()">T&#7843;i Hex</button></div>
+        <div class="row2"><button class="btn danger" onclick="actionExit()">Thoát</button></div>
+      </div>
+    </div>
+    </div><!-- end modeImgPanel -->
+
+    <!-- MODE: HEX TO IMAGE -->
+    <div id="modeHexPanel" style="display:none">
+    <!-- SUB-TABS: Dịch hex / Gán hex -->
+    <div class="mode-tabs" style="margin-bottom:6px">
+      <button class="mode-tab active" id="subTabDich" onclick="setHexSub('dich')">&#128065; D&#7883;ch hex</button>
+      <button class="mode-tab" id="subTabGan" onclick="setHexSub('gan')">&#128221; Gán hex</button>
+    </div>
+
+    <!-- DỊCH HEX PANEL -->
+    <div id="hexSubDich">
+    <div class="section">
+      <div class="section-title" style="cursor:default">DÁN HEX <span style="font-weight:400;font-size:9px;color:var(--text2)">space-separated</span></div>
+      <div class="section-body hex-input-area">
+        <textarea id="hexInput" placeholder="Dán hex vào đây...&#10;Ví dụ: 00 FF 00 FF 00 FF ..." spellcheck="false"></textarea>
+        <div class="hex-stats" id="hexStats">Ch&#432;a có d&#7919; li&#7879;u</div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">KÍCH TH&#431;&#7898;C <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Width</label><input type="number" id="hexW" value="192" min="1" max="500" onchange="onHexChange()"><span style="color:var(--text2);font-size:10px">px</span></div>
+        <div class="ctrl-row"><label>Height</label><input type="number" id="hexH" value="63" min="1" max="500" onchange="onHexChange()"><span style="color:var(--text2);font-size:10px">px</span></div>
+        <div class="ctrl-hint">T&#7921; &#273;&#7897;ng n&#7871;u dán hex &#273;&#7911; kích th&#432;&#7898;c</div>
+        <hr class="ctrl-divider">
+        <div class="row2"><button class="btn green" onclick="decodeHex()">&#9654; D&#7883;ch</button><button class="btn" onclick="clearHex()">Xóa</button></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" style="cursor:default">TÙY CH&#7884;N</div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Invert</label><div class="toggle" id="toggleHexInv" onclick="toggleHexInv()"></div><span class="toggle-label" id="hexInvLabel">OFF</span></div>
+        <div class="ctrl-row"><label>Threshold</label><input type="range" id="hexThreshold" min="0" max="255" value="128" oninput="onHexThreshold()"><span class="val" id="hexThresholdVal">128</span></div>
+        <div class="ctrl-hint">L&#7885;c nhi&#7877;u greyscale</div>
+      </div>
+    </div>
+    </div>
+
+    <!-- GÁN HEX PANEL -->
+    <div id="hexSubGan" style="display:none">
+    <div class="section">
+      <div class="section-title" style="cursor:default">DÁN HEX LI&#7872;N <span style="font-weight:400;font-size:9px;color:var(--text2)">ho&#7863;c space-separated</span></div>
+      <div class="section-body hex-input-area">
+        <textarea id="ganHexInput" placeholder="Dán hex li&#7873;n ho&#7863;c space-separated...&#10;Ví d&#7909;: FD243030DA7B3130FE03E0E930D7" spellcheck="false"></textarea>
+        <div class="hex-stats" id="ganHexStats">Ch&#432;a có d&#7919; li&#7879;u</div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" style="cursor:default">TU&#7928; CH&#7880;NH</div>
+      <div class="section-body">
+        <div class="ctrl-row"><label>Bytes/dòng</label><input type="number" id="ganBytesPerRow" value="24" min="1" max="64" onchange="formatGanHex()"><span style="color:var(--text2);font-size:10px">(24 = 192px)</span></div>
+        <div class="ctrl-row"><label>Format</label><button class="chip active" id="ganFmtSpace" onclick="setGanFmt('space')">Space</button><button class="chip" id="ganFmtCStyle" onclick="setGanFmt('cstyle')">C-style</button></div>
+        <hr class="ctrl-divider">
+        <div class="row2"><button class="btn green" onclick="formatGanHex()">&#9654; Gán</button><button class="btn" onclick="clearGanHex()">Xóa</button></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title" onclick="toggleSection(this)">K&#7870;T QU&#7842; <span class="arrow">&#9660;</span></div>
+      <div class="section-body">
+        <textarea id="ganHexOutput" style="width:100%;min-height:100px;background:var(--bg);color:var(--accent2);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:11px;font-family:var(--mono);resize:vertical;outline:none" readonly></textarea>
+        <div class="row2" style="margin-top:4px"><button class="btn" onclick="copyGanHex()">&#128203; Copy</button><button class="btn" onclick="downloadGanHex()">&#128229; Download</button></div>
+      </div>
+    </div>
+    </div>
+    </div><!-- end modeHexPanel -->
+
+    <!-- TUTORIAL BUTTON -->
+    <div class="ctrl-row" style="padding:4px 0;justify-content:center">
+      <button class="btn" onclick="showTutorial()" style="font-size:11px;padding:4px 16px">&#10067; H&#432;&#7899;ng d&#7851;n</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEX EXPORT MODAL -->
+<div id="hexOutput">
+  <div class="hex-panel">
+    <div class="hex-box">
+      <div class="hex-header"><h3>&#128230; Hex Export &mdash; Casio Bitmap</h3><button onclick="closeHex()">&#10005;</button></div>
+      <div class="hex-body">
+        <textarea id="hexContent" wrap="off" readonly></textarea>
+        <div style="margin-top:6px;font-size:10px;color:var(--text2)">&#128161; Copy r&#7891; dán vào máy Casio ho&#7863;c pixel editor</div>
+      </div>
+      <div class="hex-footer">
+        <button class="btn2" onclick="closeHex()">&#272;óng</button>
+        <button onclick="copyHex()">&#128203; Copy</button>
+        <button onclick="downloadHex()">&#128229; Download</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TUTORIAL MODAL -->
+<div id="tutorialOverlay">
+  <div class="tut-panel">
+    <div class="tut-box">
+      <div class="tut-header"><h3>&#10067; H&#432;&#7899;ng d&#7851;n s&#7917; d&#7909;ng P2B Pro</h3><button onclick="closeTutorial()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 10px;border-radius:4px;cursor:pointer">&#10005;</button></div>
+      <div class="tut-body">
+        <div class="step">
+          <b>&#9312; Ch&#7871; &#273;&#7897; &#7842;nh &#8594; Hex</b><br>
+          Dùng tab <b>&#7842;nh &#8594; Hex</b> &#7903; sidebar:<br>
+          - Kéo th&#7843; &#7843;nh, <b>Ctrl+V</b> dán &#7843;nh, ho&#7863;c nh&#7845;n <b>Ch&#7885;n &#7843;nh</b><br>
+          - Ch&#7881;nh v&#7883; trí, kích th&#432;&#7899;c, threshold, invert, sharpen<br>
+          - Dùng <b>Adjustments</b> &amp; <b>Filters</b> &#273;&#7875; x&#7917; lý &#7843;nh tr&#432;&#7899;c khi threshold<br>
+          - B&#7845;m <b>Xu&#7845;t Hex</b> &#273;&#7873; l&#7845;y hex (copy / download .txt)<br>
+          - &#272;&#7883;nh d&#7841;ng: space-separated hex bytes, m&#7895;i dòng = 1 row
+        </div>
+        <div class="step">
+          <b>&#9313; Ch&#7871; &#273;&#7896; Hex &#8594; &#7842;nh (D&#7883;ch hex)</b><br>
+          Dùng tab <b>Hex &#8594; &#7842;nh</b> &#7903; sidebar:<br>
+          - Dán hex (space-separated, v.d. <code>00 FF 00 FF</code>) vào ô text<br>
+          - &#272;i&#7873;n <b>Width</b> và <b>Height</b> n&#7871;u c&#7847;n (t&#7921; &#273;&#7897;ng tính n&#7871;u &#273;&#7911; s&#7889; byte)<br>
+          - B&#7845;m <b>D&#7883;ch</b> ho&#7863;c <b>Ctrl+Enter</b> &#273;&#7875; xem bitmap<br>
+          - Dùng <b>Invert</b> và <b>Threshold</b> &#273;&#7875; l&#7885;c &#7843;nh<br>
+          - Có th&#7875; <b>Ctrl+V</b> tr&#7921;c ti&#7871;p hex t&#7915; b&#7845;t k&#7923; &#273;âu, tool t&#7921; &#273;&#7897;ng nh&#7853;n di&#7879;n
+        </div>
+        <div class="step">
+          <b>&#9314; Auto-detect</b><br>
+          Khi b&#7841;n nh&#7845;n <b>Ctrl+V</b>:<br>
+          - N&#7871;u clipboard có &#7843;nh &#8594; t&#7921; &#273;&#7897;ng chuy&#7875;n sang ch&#7871; &#273;&#7897; &#7842;nh &#8594; Hex<br>
+          - N&#7871;u clipboard có text d&#7841;ng hex (nhi&#7871;u c&#7863;p hex phân cách b&#7857;ng space) &#8594; t&#7921; &#273;&#7897;ng chuy&#7875;n sang Hex &#8594; &#7842;nh và d&#7883;ch luôn
+        </div>
+        <div class="step">
+          <b>&#9315; Th&#7917; thu&#7853;t</b><br>
+          - <b>Canvas</b> m&#7863;c &#273;&#7883;nh 192x63 (màn hình Casio)<br>
+          - Dùng <b>Dither</b> &#273;&#7875; gi&#7843;m s&#7889; màu tr&#432;&#7899;c khi threshold<br>
+          - <b>Remove BG</b> dùng edge detection &#273;&#7875; lo&#7841;i n&#7873;n<br>
+          - Export hex d&#7841;ng space-separated, t&#432;&#417;ng thích v&#7899;i pixel editor c&#7911;a VECF
+        </div>
+      </div>
+      <div class="tut-footer"><button onclick="closeTutorial()">&#272;ã hi&#7875;u</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== STATE =====
+const state = {
+  img: null, imgLoaded: false,
+  mode: 'img', // 'img' or 'hex'
+  canvasW: 192, canvasH: 63,
+  imgX: 0, imgY: 0, imgW: 192, imgH: 44,
+  threshold: 128, invert: false, sharpen: false, removebg: false,
+  brightness: 0, contrast: 0, exposure: 0,
+  levelsBlack: 0, levelsWhite: 255, levelsGamma: 1.0,
+  clarity: 0, nr: 0, grain: 0,
+  smartSharpen: 0, smartSharpenRadius: 1,
+  fieldBlur: 0, motionBlur: 0, motionBlurAngle: 0,
+  highpass: 0, emboss: false, equalize: false,
+  posterize: false, posterizeLevel: 4,
+  clahe: false, claheClip: 3,
+  dither: false, ditherBits: 2,
+  zoom: 4,
+  // hex decode state
+  hexInv: false, hexThreshold: 128,
+  hexData: null, // parsed Uint8Array
+};
+
+const $ = id => document.getElementById(id);
+const canvas = $('mainCanvas');
+const ctx = canvas.getContext('2d');
+const procCanvas = document.createElement('canvas');
+const procCtx = procCanvas.getContext('2d');
+
+// ===== INIT =====
+function init() {
+  resizeCanvas();
+  updateCanvasSize();
+  fitZoom();
+  window.addEventListener('resize', fitZoom);
+  // Auto-debounce hex input
+  let dTimer;
+  $('hexInput').addEventListener('input', () => {
+    clearTimeout(dTimer);
+    dTimer = setTimeout(autoDetectHex, 400);
+  });
+  $('hexInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); decodeHex(); }
+  });
+}
+
+function resizeCanvas() {
+  canvas.width = state.canvasW;
+  canvas.height = state.canvasH;
+  procCanvas.width = state.canvasW;
+  procCanvas.height = state.canvasH;
+}
+
+function updateCanvasSize() {
+  canvas.style.width = (state.canvasW * state.zoom) + 'px';
+  canvas.style.height = (state.canvasH * state.zoom) + 'px';
+}
+
+function fitZoom() {
+  const area = $('canvasArea');
+  if (!area) return;
+  const rect = area.getBoundingClientRect();
+  const maxW = rect.width * 0.85;
+  const maxH = rect.height * 0.75;
+  const zoomW = Math.floor(maxW / state.canvasW);
+  const zoomH = Math.floor(maxH / state.canvasH);
+  state.zoom = Math.max(1, Math.min(zoomW, zoomH, 20));
+  updateCanvasSize();
+  $('ciZoom').textContent = state.zoom + 'x';
+}
+
+// ===== MODE SWITCH =====
+function setMode(mode) {
+  state.mode = mode;
+  $('tabImgToHex').classList.toggle('active', mode === 'img');
+  $('tabHexToImg').classList.toggle('active', mode === 'hex');
+  $('modeImgPanel').style.display = mode === 'img' ? 'block' : 'none';
+  $('modeHexPanel').style.display = mode === 'hex' ? 'block' : 'none';
+  $('sMode').textContent = mode === 'img' ? '\u2192 Hex' : 'Hex \u2192';
+  if (mode === 'hex' && state.hexData) {
+    renderHex();
+  } else if (mode === 'img') {
+    render();
+  }
+}
+
+// ===== IMAGE LOADING =====
+$('fileInput').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) loadFile(f);
+});
+
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadFile(f);
+});
+
+// Ctrl+V: auto-detect image or hex
+document.addEventListener('paste', e => {
+  const items = e.clipboardData.items;
+  // First check for image
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const blob = item.getAsFile();
+      if (blob) { setMode('img'); loadFile(blob); return; }
+    }
+  }
+  // Check for text (hex)
+  for (const item of items) {
+    if (item.type === 'text/plain') {
+      item.getAsString(text => {
+        if (looksLikeHex(text)) {
+          setMode('hex');
+          $('hexInput').value = text.trim();
+          decodeHex();
+          showToast('Phát hi&#7879;n hex!');
+        }
+      });
+    }
+  }
+});
+
+function looksLikeHex(text) {
+  const cleaned = text.trim().replace(/[\s,;\n\r]+/g, ' ');
+  const parts = cleaned.split(/\s+/);
+  if (parts.length < 4) return false;
+  const hexRe = /^[0-9A-Fa-f]{2}$/;
+  let hexCount = 0;
+  for (const p of parts) {
+    if (hexRe.test(p)) hexCount++;
+  }
+  return hexCount >= parts.length * 0.8 && hexCount >= 4;
+}
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      state.img = img; state.imgLoaded = true;
+      state.imgW = Math.min(img.width, state.canvasW);
+      state.imgH = Math.min(img.height, state.canvasH);
+      state.imgX = ~~((state.canvasW - state.imgW) / 2);
+      state.imgY = ~~((state.canvasH - state.imgH) / 2);
+      $('sizeW').value = state.imgW; $('sizeH').value = state.imgH;
+      $('emptyState').style.display = 'none';
+      $('canvasWrapper').style.display = 'flex';
+      updateUI();
+      fitZoom();
+      render();
+      showToast('&#7842nh &#273;ã t&#7843;i: ' + file.name);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ===== HEX DECODE =====
+function autoDetectHex() {
+  const text = $('hexInput').value.trim();
+  if (looksLikeHex(text)) decodeHex();
+}
+
+function parseHexData(text) {
+  const cleaned = text.trim().replace(/[\s,;\n\r]+/g, ' ').trim();
+  const parts = cleaned.split(/\s+/);
+  const bytes = [];
+  for (const p of parts) {
+    if (/^[0-9A-Fa-f]{2}$/.test(p)) bytes.push(parseInt(p, 16));
+  }
+  return new Uint8Array(bytes);
+}
+
+function decodeHex() {
+  const text = $('hexInput').value.trim();
+  if (!text) { showToast('Ch&#432;a có hex!'); return; }
+  const data = parseHexData(text);
+  if (data.length < 4) { showToast('Hex quá ng&#7855;n! C&#7847;n ít nh&#7845;t 4 bytes'); return; }
+  state.hexData = data;
+
+  // Auto-detect dimensions
+  const w = parseInt($('hexW').value) || 192;
+  const h = parseInt($('hexH').value) || 63;
+  const bytesPerRow = Math.ceil(w / 8);
+  // If data fits exactly for the given W, use auto height
+  if (data.length % bytesPerRow === 0) {
+    const autoH = data.length / bytesPerRow;
+    if (autoH !== h && autoH > 0) {
+      $('hexH').value = autoH;
+    }
+  }
+
+  renderHex();
+  showToast('&#272;ã d&#7883;ch ' + data.length + ' bytes');
+}
+
+function renderHex() {
+  if (!state.hexData) { ctx.clearRect(0,0,canvas.width,canvas.height); return; }
+  const data = state.hexData;
+  const w = parseInt($('hexW').value) || 192;
+  const h = parseInt($('hexH').value) || 63;
+  const bytesPerRow = Math.ceil(w / 8);
+
+  state.canvasW = w;
+  state.canvasH = h;
+  canvas.width = w; canvas.height = h;
+  procCanvas.width = w; procCanvas.height = h;
+
+  const imageData = procCtx.createImageData(w, h);
+  const px = imageData.data;
+  const inv = state.hexInv;
+  const th = state.hexThreshold;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const byteIdx = y * bytesPerRow + Math.floor(x / 8);
+      let bitVal = 0;
+      if (byteIdx < data.length) {
+        bitVal = (data[byteIdx] >> (7 - (x % 8))) & 1;
+      }
+      // bitVal: 1 = black (on), 0 = white (off)
+      let gray = bitVal ? 0 : 255;
+      if (inv) gray = 255 - gray;
+
+      // Apply threshold if grayscale input is supported (for mixed data)
+      // In standard format, bits are already binary, but allow threshold for nonstandard hex
+      const idx = (y * w + x) * 4;
+      px[idx] = px[idx+1] = px[idx+2] = gray;
+      px[idx+3] = 255;
+    }
+  }
+  procCtx.putImageData(imageData, 0, 0);
+  ctx.clearRect(0,0,w,h);
+  ctx.drawImage(procCanvas, 0, 0);
+
+  // Update stats
+  const totalPx = w * h;
+  let onPx = 0;
+  for (let i = 0; i < px.length; i += 4) if (px[i] === 0) onPx++;
+  $('sCanvas').textContent = w+'x'+h;
+  $('sImg').textContent = w+'x'+h;
+  $('sPos').textContent = '(0,0)';
+  $('sThreshold').textContent = th;
+  $('sPixels').textContent = onPx;
+  $('sTotal').textContent = totalPx;
+  $('sPct').textContent = ((onPx/totalPx)*100).toFixed(1);
+  $('ciCanvas').textContent = w+'x'+h;
+  $('ciImg').textContent = w+'x'+h;
+
+  // Update hex stats
+  const expectedRows = Math.ceil(data.length / bytesPerRow);
+  $('hexStats').textContent = data.length + ' bytes | ' + bytesPerRow + ' bytes/row | ~' + expectedRows + ' rows';
+
+  state.canvasW = w; state.canvasH = h;
+  updateCanvasSize();
+  fitZoom();
+  updateStatus();
+  updateCanvasInfo();
+
+  // Show canvas wrapper
+  $('emptyState').style.display = 'none';
+  $('canvasWrapper').style.display = 'flex';
+}
+
+function onHexChange() { if (state.hexData) decodeHex(); }
+function onHexThreshold() {
+  state.hexThreshold = parseInt($('hexThreshold').value);
+  $('hexThresholdVal').textContent = state.hexThreshold;
+  if (state.hexData) renderHex();
+}
+function toggleHexInv() {
+  state.hexInv = !state.hexInv;
+  $('toggleHexInv').classList.toggle('on');
+  $('hexInvLabel').textContent = state.hexInv ? 'ON' : 'OFF';
+  if (state.hexData) renderHex();
+}
+function clearHex() {
+  $('hexInput').value = '';
+  state.hexData = null;
+  $('hexStats').textContent = 'Ch&#432;a có d&#7919; li&#7879;u';
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  $('canvasWrapper').style.display = 'none';
+  $('emptyState').style.display = 'flex';
+}
+
+// ===== HEX SUB-MODE (Dịch / Gán) =====
+let ganFmt = 'space';
+
+function setHexSub(mode) {
+  $('subTabDich').classList.toggle('active', mode==='dich');
+  $('subTabGan').classList.toggle('active', mode==='gan');
+  $('hexSubDich').style.display = mode==='dich' ? 'block' : 'none';
+  $('hexSubGan').style.display = mode==='gan' ? 'block' : 'none';
+}
+
+function setGanFmt(fmt) {
+  ganFmt = fmt;
+  $('ganFmtSpace').classList.toggle('active', fmt==='space');
+  $('ganFmtCStyle').classList.toggle('active', fmt==='cstyle');
+  formatGanHex();
+}
+
+function formatGanHex() {
+  const input = $('ganHexInput').value.trim();
+  if (!input) { $('ganHexStats').textContent = 'Ch&#432;a có d&#7919; li&#7879;u'; $('ganHexOutput').value = ''; return; }
+  const cleaned = input.replace(/[\s,;\n\r]+/g, '').trim();
+  const bytesPerRow = parseInt($('ganBytesPerRow').value) || 24;
+  const bytes = [];
+  for (let i = 0; i < cleaned.length; i += 2) {
+    if (i+1 < cleaned.length && /^[0-9A-Fa-f]{2}$/.test(cleaned.substr(i,2))) bytes.push(cleaned.substr(i,2));
+  }
+  if (!bytes.length) { $('ganHexStats').textContent = 'Ko có hex!'; return; }
+  const rows = [];
+  for (let i = 0; i < bytes.length; i += bytesPerRow) {
+    const chunk = bytes.slice(i, i + bytesPerRow);
+    if (ganFmt === 'cstyle') {
+      rows.push('  ' + chunk.map(b => '0x' + b.toUpperCase()).join(', '));
+    } else {
+      rows.push('  ' + chunk.join(' '));
+    }
+  }
+  const result = rows.join(',\n');
+  $('ganHexOutput').value = result;
+  $('ganHexStats').textContent = bytes.length + ' bytes | ' + rows.length + ' dòng';
+}
+
+function clearGanHex() {
+  $('ganHexInput').value = '';
+  $('ganHexOutput').value = '';
+  $('ganHexStats').textContent = 'Ch&#432;a có d&#7919; li&#7879;u';
+}
+
+function copyGanHex() {
+  const t = $('ganHexOutput').value;
+  if (!t) return;
+  navigator.clipboard.writeText(t).then(() => showToast('Copy xong!')).catch(() => {
+    const ta = document.createElement('textarea'); ta.value = t;
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    showToast('Copy xong!');
+  });
+}
+
+function downloadGanHex() {
+  const t = $('ganHexOutput').value;
+  if (!t) return;
+  const b = new Blob([t], {type:'text/plain'});
+  const u = URL.createObjectURL(b);
+  const a = document.createElement('a'); a.href = u; a.download = 'hex_data.txt';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(u), 1000);
+  showToast('&#272;ã t&#7843;i file!');
+}
+
+// ===== ZOOM =====
+function zoomIn() { state.zoom = Math.min(state.zoom * 1.5, 20); updateCanvasSize(); $('ciZoom').textContent = state.zoom.toFixed(1) + 'x'; }
+function zoomOut() { state.zoom = Math.max(state.zoom / 1.5, 1); updateCanvasSize(); $('ciZoom').textContent = state.zoom.toFixed(1) + 'x'; }
+function zoomReset() { state.zoom = 1; updateCanvasSize(); $('ciZoom').textContent = '1x'; }
+function zoomFit() { fitZoom(); }
+
+// ===== PROCESSING =====
+function process() {
+  if (!state.imgLoaded) { if (state.mode !== 'hex') ctx.clearRect(0,0,canvas.width,canvas.height); return; }
+  const w = state.canvasW, h = state.canvasH;
+  procCtx.clearRect(0,0,w,h);
+  procCtx.drawImage(state.img, state.imgX, state.imgY, state.imgW, state.imgH);
+
+  let imageData = procCtx.getImageData(0,0,w,h);
+  let data = imageData.data;
+
+  if (state.removebg) applyRemovebg(data, w, h);
+  if (state.brightness !== 0) { const b=state.brightness; for(let i=0;i<data.length;i+=4){data[i]=clamp(data[i]+b);data[i+1]=clamp(data[i+1]+b);data[i+2]=clamp(data[i+2]+b);} }
+  if (state.contrast !== 0) { const c=(259*(state.contrast+255))/(255*(259-state.contrast)); for(let i=0;i<data.length;i+=4){data[i]=clamp(c*(data[i]-128)+128);data[i+1]=clamp(c*(data[i+1]-128)+128);data[i+2]=clamp(c*(data[i+2]-128)+128);} }
+  if (state.exposure !== 0) { const e=Math.pow(2,state.exposure/10); for(let i=0;i<data.length;i+=4){data[i]=clamp(data[i]*e);data[i+1]=clamp(data[i+1]*e);data[i+2]=clamp(data[i+2]*e);} }
+  if (state.levelsBlack!==0||state.levelsWhite!==255||Math.abs(state.levelsGamma-1)>0.01) { const b=state.levelsBlack,w2=state.levelsWhite,g=state.levelsGamma,range=w2-b; if(range>0){for(let i=0;i<data.length;i+=4){for(let j=0;j<3;j++){let v=(data[i+j]-b)/range;v=clampF(v);v=Math.pow(v,1/g);data[i+j]=clamp(Math.round(v*255));}}} }
+  if (state.clarity!==0) applyClarity(data,w,h,state.clarity);
+  if (state.nr>0) data=applyBoxBlur(data,w,h,Math.max(1,Math.round(state.nr/10)));
+  if (state.grain>0) { const g=state.grain*0.5; for(let i=0;i<data.length;i+=4){const noise=(Math.random()-0.5)*g*2;data[i]=clamp(data[i]+noise);data[i+1]=clamp(data[i+1]+noise);data[i+2]=clamp(data[i+2]+noise);} }
+  if (state.smartSharpen>0) data=applySmartSharpen(data,w,h,state.smartSharpen,state.smartSharpenRadius);
+  if (state.fieldBlur>0) data=applyBoxBlur(data,w,h,Math.max(1,Math.round(state.fieldBlur)));
+  if (state.motionBlur>0) data=applyMotionBlur(data,w,h,state.motionBlur,state.motionBlurAngle);
+  if (state.highpass>0) data=applyHighpass(data,w,h,state.highpass);
+  if (state.emboss) data=applyEmboss(data,w,h);
+  if (state.equalize) data=applyEqualize(data,w,h);
+  if (state.posterize) { const l=Math.max(2,state.posterizeLevel),s=255/(l-1); for(let i=0;i<data.length;i+=4){for(let j=0;j<3;j++)data[i+j]=Math.round(Math.round(data[i+j]/s)*s);} }
+  if (state.clahe) data=applyCLAHE(data,w,h,state.claheClip);
+  if (state.dither&&state.ditherBits>1) data=applyDither(data,w,h,state.ditherBits);
+  procCtx.putImageData(imageData,0,0);
+
+  let bwData=procCtx.getImageData(0,0,w,h);
+  let bw=bwData.data;
+  for(let i=0;i<bw.length;i+=4){const g=Math.round(bw[i]*0.299+bw[i+1]*0.587+bw[i+2]*0.114);bw[i]=bw[i+1]=bw[i+2]=g;}
+  const t=state.threshold;
+  for(let i=0;i<bw.length;i+=4){const v=bw[i]<t?0:255;bw[i]=bw[i+1]=bw[i+2]=v;bw[i+3]=255;}
+  if(state.invert){for(let i=0;i<bw.length;i+=4)bw[i]=bw[i+1]=bw[i+2]=255-bw[i];}
+  if(state.sharpen)applySharpenBW(bw,w,h);
+  procCtx.putImageData(bwData,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(procCanvas,0,0);
+
+  let onPixels=0;
+  for(let i=0;i<bw.length;i+=4) if(bw[i]===0) onPixels++;
+  $('sPixels').textContent=onPixels;
+  $('sTotal').textContent=w*h;
+  $('sPct').textContent=((onPixels/(w*h))*100).toFixed(1);
+  updateStatus(); updateCanvasInfo();
+}
+
+function clamp(v){return Math.max(0,Math.min(255,Math.round(v)));}
+function clampF(v){return Math.max(0,Math.min(1,v));}
+
+// ===== FILTERS =====
+function applyRemovebg(data,w,h){const corners=[{x:0,y:0},{x:w-1,y:0},{x:0,y:h-1},{x:w-1,y:h-1},{x:~~(w/2),y:0},{x:~~(w/2),y:h-1},{x:0,y:~~(h/2)},{x:w-1,y:~~(h/2)}];let samples=[];for(const c of corners){const idx=(c.y*w+c.x)*4;samples.push({r:data[idx],g:data[idx+1],b:data[idx+2]});}const bgR=samples.reduce((s,c)=>s+c.r,0)/samples.length;const bgG=samples.reduce((s,c)=>s+c.g,0)/samples.length;const bgB=samples.reduce((s,c)=>s+c.b,0)/samples.length;const th=40;for(let i=0;i<data.length;i+=4){const dr=data[i]-bgR,dg=data[i+1]-bgG,db=data[i+2]-bgB;if(Math.sqrt(dr*dr+dg*dg+db*db)<th){const px=(i/4)%w,py=~~((i/4)/w);let isEdge=false;for(let dy=-1;dy<=1&&!isEdge;dy++)for(let dx=-1;dx<=1&&!isEdge;dx++){if(dx===0&&dy===0)continue;const nx=px+dx,ny=py+dy;if(nx>=0&&nx<w&&ny>=0&&ny<h){const ni=(ny*w+nx)*4;if(Math.sqrt(Math.pow(data[ni]-bgR,2)+Math.pow(data[ni+1]-bgG,2)+Math.pow(data[ni+2]-bgB,2))>th*1.5)isEdge=true;}}if(!isEdge)data[i]=data[i+1]=data[i+2]=255;}}}
+function applyClarity(data,w,h,a){const b=applyBoxBlur(new Uint8ClampedArray(data),w,h,5);const f=a/100;for(let i=0;i<data.length;i+=4){for(let j=0;j<3;j++)data[i+j]=clamp(data[i+j]+(data[i+j]-b[i+j])*f);}}
+function applyBoxBlur(data,w,h,r){const R=new Uint8ClampedArray(data);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let r=0,g=0,b=0,c=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx>=0&&nx<w&&ny>=0&&ny<h){const idx=(ny*w+nx)*4;r+=data[idx];g+=data[idx+1];b+=data[idx+2];c++;}}const idx=(y*w+x)*4;R[idx]=r/c;R[idx+1]=g/c;R[idx+2]=b/c;}return R;}
+function applySmartSharpen(data,w,h,a,r){const b=applyBoxBlur(new Uint8ClampedArray(data),w,h,Math.max(1,Math.round(r)));const amt=a/100;const R=new Uint8ClampedArray(data);for(let i=0;i<data.length;i+=4){for(let j=0;j<3;j++)R[i+j]=clamp(data[i+j]+(data[i+j]-b[i+j])*amt);}return R;}
+function applyMotionBlur(data,w,h,len,ang){const rad=ang*Math.PI/180,dx=Math.cos(rad),dy=Math.sin(rad),L=Math.max(1,Math.round(len));const R=new Uint8ClampedArray(data.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let r=0,g=0,b=0,c=0;for(let s=-L;s<=L;s++){const nx=Math.round(x+s*dx),ny=Math.round(y+s*dy);if(nx>=0&&nx<w&&ny>=0&&ny<h){const idx=(ny*w+nx)*4;r+=data[idx];g+=data[idx+1];b+=data[idx+2];c++;}}const idx=(y*w+x)*4;R[idx]=r/c;R[idx+1]=g/c;R[idx+2]=b/c;R[idx+3]=255;}return R;}
+function applyHighpass(data,w,h,r){const b=applyBoxBlur(new Uint8ClampedArray(data),w,h,Math.max(1,Math.round(r)));const R=new Uint8ClampedArray(data);for(let i=0;i<data.length;i+=4){for(let j=0;j<3;j++)R[i+j]=clamp(data[i+j]-b[i+j]+128);}return R;}
+function applyEmboss(data,w,h){const R=new Uint8ClampedArray(data),k=[-2,-1,0,-1,1,1,0,1,2];for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){let r=0,g=0,b=0,ki=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const idx=((y+dy)*w+(x+dx))*4;r+=data[idx]*k[ki];g+=data[idx+1]*k[ki];b+=data[idx+2]*k[ki];ki++;}const idx=(y*w+x)*4;R[idx]=clamp(r+128);R[idx+1]=clamp(g+128);R[idx+2]=clamp(b+128);}return R;}
+function applyEqualize(data,w,h){const hh=new Array(256).fill(0);for(let i=0;i<data.length;i+=4)hh[Math.round(data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114)]++;const cdf=new Array(256);let s=0;const t=w*h;for(let i=0;i<256;i++){s+=hh[i];cdf[i]=s/t;}const m=new Array(256);for(let i=0;i<256;i++)m[i]=Math.round(cdf[i]*255);const R=new Uint8ClampedArray(data);for(let i=0;i<data.length;i+=4){const l=Math.round(data[i]*0.299+data[i+1]*0.587+data[i+2]*0.114),mp=m[l];const r=l>0?mp/l:1;R[i]=clamp(data[i]*r);R[i+1]=clamp(data[i+1]*r);R[i+2]=clamp(data[i+2]*r);}return R;}
+function applyCLAHE(data,w,h,cl){const ts=32,tx=Math.ceil(w/ts),ty=Math.ceil(h/ts);const R=new Uint8ClampedArray(data),cdfs=[];for(let yy=0;yy<ty;yy++)for(let xx=0;xx<tx;xx++){const hh=new Array(256).fill(0);let cnt=0;const x0=xx*ts,y0=yy*ts,x1=Math.min(x0+ts,w),y1=Math.min(y0+ts,h);for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const idx=(y*w+x)*4;hh[Math.round(data[idx]*0.299+data[idx+1]*0.587+data[idx+2]*0.114)]++;cnt++;}const clip=(cnt/256)*cl;let cli=0;for(let i=0;i<256;i++){if(hh[i]>clip){cli+=hh[i]-clip;hh[i]=clip;}}const rd=cli/256;for(let i=0;i<256;i++)hh[i]+=rd;const cdf=new Array(256);let ss=0;for(let i=0;i<256;i++){ss+=hh[i];cdf[i]=ss/cnt;}const mm=new Array(256);for(let i=0;i<256;i++)mm[i]=Math.round(cdf[i]*255);cdfs.push(mm);}for(let y=0;y<h;y++)for(let x=0;x<w;x++){const tx2=~~(x/ts),ty2=~~(y/ts);const fx=(x-tx2*ts)/ts,fy=(y-ty2*ts)/ts;const idx=(y*w+x)*4;const l=Math.round(data[idx]*0.299+data[idx+1]*0.587+data[idx+2]*0.114);const gm=(a,b)=>{a=Math.max(0,Math.min(tx-1,a));b=Math.max(0,Math.min(ty-1,b));return cdfs[b*tx+a][l];};const v00=gm(tx2,ty2),v10=gm(tx2+1,ty2),v01=gm(tx2,ty2+1),v11=gm(tx2+1,ty2+1);const mp=(v00*(1-fx)+v10*fx)*(1-fy)+(v01*(1-fx)+v11*fx)*fy;const r=l>0?mp/l:1;R[idx]=clamp(data[idx]*r);R[idx+1]=clamp(data[idx+1]*r);R[idx+2]=clamp(data[idx+2]*r);}return R;}
+function applyDither(data,w,h,bits){const lv=Math.pow(2,bits),st=255/(lv-1);const R=new Uint8ClampedArray(data);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const idx=(y*w+x)*4;for(let j=0;j<3;j++){const ov=R[idx+j],nv=Math.round(Math.round(ov/st)*st);R[idx+j]=nv;const e=ov-nv;if(x+1<w)R[(y*w+x+1)*4+j]+=e*7/16;if(x-1>=0&&y+1<h)R[((y+1)*w+x-1)*4+j]+=e*3/16;if(y+1<h)R[((y+1)*w+x)*4+j]+=e*5/16;if(x+1<w&&y+1<h)R[((y+1)*w+x+1)*4+j]+=e*1/16;}}return R;}
+function applySharpenBW(data,w,h){const k=[0,-1,0,-1,5,-1,0,-1,0];const R=new Uint8ClampedArray(data);for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){let s=0,ki=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)s+=((data[((y+dy)*w+(x+dx))*4]/255)*k[ki++]);const idx=(y*w+x)*4;const v=clamp((s+1)*128);R[idx]=R[idx+1]=R[idx+2]=v<128?0:255;}for(let i=0;i<R.length;i+=4)R[i+3]=255;for(let i=0;i<data.length;i+=4){data[i]=R[i];data[i+1]=R[i+1];data[i+2]=R[i+2];}}
+
+// ===== RENDER =====
+function render() { if (state.mode === 'img') process(); }
+
+// ===== UI =====
+function updateUI() {
+  $('sizeW').value=state.imgW; $('sizeH').value=state.imgH;
+  $('moveX').value=state.imgX; $('moveY').value=state.imgY;
+  $('threshold').value=state.threshold;
+}
+function updateStatus() {
+  $('sCanvas').textContent=state.canvasW+'x'+state.canvasH;
+  $('sImg').textContent=state.imgLoaded?state.imgW+'x'+state.imgH:'--';
+  $('sPos').textContent='('+state.imgX+','+state.imgY+')';
+  $('sThreshold').textContent=state.mode==='hex'?state.hexThreshold:state.threshold;
+  $('sInvBadge').textContent=state.mode==='hex'?(state.hexInv?'Invert: \u2705':'Invert: \u274c'):(state.invert?'Invert: \u2705':'Invert: \u274c');
+}
+function updateCanvasInfo() {
+  $('ciCanvas').textContent=state.canvasW+'x'+state.canvasH;
+  $('ciImg').textContent=state.imgLoaded?state.imgW+'x'+state.imgH:(state.hexData?state.canvasW+'x'+state.canvasH:'--');
+  $('ciPos').textContent='('+state.imgX+','+state.imgY+')';
+}
+
+// ===== ACTIONS =====
+function actionMove(){state.imgX=parseInt($('moveX').value)||0;state.imgY=parseInt($('moveY').value)||0;render();}
+function actionCenter(){state.imgX=~~((state.canvasW-state.imgW)/2);state.imgY=~~((state.canvasH-state.imgH)/2);$('moveX').value=state.imgX;$('moveY').value=state.imgY;render();}
+function actionTL(){state.imgX=0;state.imgY=0;$('moveX').value=0;$('moveY').value=0;render();}
+function actionTR(){state.imgX=state.canvasW-state.imgW;state.imgY=0;$('moveX').value=state.imgX;$('moveY').value=0;render();}
+function actionBL(){state.imgX=0;state.imgY=state.canvasH-state.imgH;$('moveX').value=0;$('moveY').value=state.imgY;render();}
+function actionBR(){state.imgX=state.canvasW-state.imgW;state.imgY=state.canvasH-state.imgH;$('moveX').value=state.imgX;$('moveY').value=state.imgY;render();}
+function actionSize(){state.imgW=parseInt($('sizeW').value)||1;state.imgH=parseInt($('sizeH').value)||1;render();}
+function actionFitToCanvas(){if(!state.img)return;const a=state.img.naturalWidth/state.img.naturalHeight,ca=state.canvasW/state.canvasH;if(a>ca){state.imgW=state.canvasW;state.imgH=Math.round(state.canvasW/a);}else{state.imgH=state.canvasH;state.imgW=Math.round(state.canvasH*a);}state.imgX=~~((state.canvasW-state.imgW)/2);state.imgY=~~((state.canvasH-state.imgH)/2);$('sizeW').value=state.imgW;$('sizeH').value=state.imgH;$('moveX').value=state.imgX;$('moveY').value=state.imgY;render();}
+function actionOriginalSize(){if(!state.img)return;state.imgW=state.img.naturalWidth;state.imgH=state.img.naturalHeight;state.imgX=~~((state.canvasW-state.imgW)/2);state.imgY=~~((state.canvasH-state.imgH)/2);$('sizeW').value=state.imgW;$('sizeH').value=state.imgH;$('moveX').value=state.imgX;$('moveY').value=state.imgY;render();}
+
+function onAdj() {
+  state.threshold=parseInt($('threshold').value);
+  state.brightness=parseInt($('brightness').value);
+  state.contrast=parseInt($('contrast').value);
+  state.exposure=parseFloat($('exposure').value);
+  state.levelsBlack=parseInt($('levelsBlack').value)||0;state.levelsWhite=parseInt($('levelsWhite').value)||255;state.levelsGamma=parseFloat($('levelsGamma').value)||1;
+  state.clarity=parseInt($('clarity').value);state.nr=parseInt($('nr').value);state.grain=parseInt($('grain').value);
+  state.smartSharpen=parseInt($('smartSharpen').value);state.smartSharpenRadius=parseFloat($('smartSharpenRadius').value)||1;
+  state.fieldBlur=parseFloat($('fieldBlur').value);state.motionBlur=parseFloat($('motionBlur').value);state.motionBlurAngle=parseInt($('motionBlurAngle').value)||0;
+  state.highpass=parseFloat($('highpass').value);state.posterizeLevel=parseInt($('posterizeLevel').value)||4;state.claheClip=parseInt($('claheClip').value)||3;state.ditherBits=parseInt($('ditherBits').value)||2;
+  $('thresholdVal').textContent=state.threshold;$('brightnessVal').textContent=state.brightness;$('contrastVal').textContent=state.contrast;$('exposureVal').textContent=state.exposure.toFixed(1);$('clarityVal').textContent=state.clarity;$('nrVal').textContent=state.nr;$('grainVal').textContent=state.grain;$('smartSharpenVal').textContent=state.smartSharpen;$('fieldBlurVal').textContent=state.fieldBlur.toFixed(1);$('motionBlurVal').textContent=state.motionBlur.toFixed(1);$('highpassVal').textContent=state.highpass.toFixed(1);
+  render();
+}
+function toggleChip(el,key){el.classList.toggle('active');state[key]=el.classList.contains('active');render();}
+function toggleRemovebg(){state.removebg=!state.removebg;$('toggleRemovebg').classList.toggle('on');$('removebgLabel').textContent=state.removebg?'ON':'OFF';render();}
+
+function actionReset() {
+  state.brightness=0;state.contrast=0;state.exposure=0;state.levelsBlack=0;state.levelsWhite=255;state.levelsGamma=1.0;
+  state.clarity=0;state.nr=0;state.grain=0;state.smartSharpen=0;state.smartSharpenRadius=1;
+  state.fieldBlur=0;state.motionBlur=0;state.motionBlurAngle=0;state.highpass=0;
+  state.emboss=false;state.equalize=false;state.posterize=false;state.posterizeLevel=4;
+  state.clahe=false;state.claheClip=3;state.dither=false;state.ditherBits=2;
+  state.removebg=false;state.invert=false;state.sharpen=false;state.threshold=128;
+  $('brightness').value=0;$('contrast').value=0;$('exposure').value=0;$('clarity').value=0;$('nr').value=0;$('grain').value=0;
+  $('smartSharpen').value=0;$('fieldBlur').value=0;$('motionBlur').value=0;$('highpass').value=0;
+  $('threshold').value=128;$('levelsBlack').value=0;$('levelsWhite').value=255;$('levelsGamma').value=1.0;
+  document.querySelectorAll('.chip.active').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.toggle.on').forEach(el=>el.classList.remove('on'));
+  $('removebgLabel').textContent='OFF';onAdj();
+}
+
+// ===== EXPORT =====
+function generateHexData() {
+  if (!state.imgLoaded) return null;
+  process();
+  const w=state.canvasW,h=state.canvasH;
+  const imageData=procCtx.getImageData(0,0,w,h);
+  const data=imageData.data;
+  const bpr=Math.ceil(w/8);
+  const rows=[];
+  for(let y=0;y<h;y++){const b=[];for(let bx=0;bx<bpr;bx++){let byte=0;for(let bit=0;bit<8;bit++){const px=bx*8+bit;if(px<w&&data[(y*w+px)*4]===0)byte|=(1<<(7-bit));}b.push(byte.toString(16).toUpperCase().padStart(2,'0'));}rows.push(b.join(' '));}
+  return {text: rows.join('\n'), bytes: h*bpr, w, h};
+}
+
+function actionExport() {
+  const d = generateHexData();
+  if (!d) { showToast('Ch&#432;a có &#7843;nh!'); return; }
+  $('hexContent').value = d.text;
+  $('hexOutput').style.display='block';
+  showToast('Xu&#7845;t hex thành công! '+d.bytes+' bytes');
+}
+
+function actionExportDownload() {
+  const d = generateHexData();
+  if (!d) { showToast('Ch&#432;a có &#7843;nh!'); return; }
+  const b=new Blob([d.text],{type:'text/plain'});
+  const u=URL.createObjectURL(b);
+  const a=document.createElement('a');a.href=u;a.download='bitmap_'+d.w+'x'+d.h+'.txt';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(u),1000);
+  showToast('&#272;ã t&#7843;i bitmap_'+d.w+'x'+d.h+'.txt');
+}
+
+function closeHex(){$('hexOutput').style.display='none';}
+function copyHex(){const t=$('hexContent').value;navigator.clipboard.writeText(t).then(()=>showToast('Copy xong!')).catch(()=>{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('Copy xong!');});}
+function downloadHex(){const t=$('hexContent').value;const b=new Blob([t],{type:'text/plain'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='bitmap_hex.txt';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(u),1000);showToast('&#272;ã t&#7843;i bitmap_hex.txt');}
+
+function actionExit() {
+  if(confirm('Thoát? D&#7919; li&#7879;u s&#7869; b&#7883; m&#7845;t.')){closeHex();state.img=null;state.imgLoaded=false;$('canvasWrapper').style.display='none';$('emptyState').style.display='flex';ctx.clearRect(0,0,canvas.width,canvas.height);updateStatus();}
+}
+
+// ===== HELPERS =====
+function toggleSection(el){el.classList.toggle('collapsed');el.nextElementSibling.classList.toggle('hidden');}
+function showToast(msg){const t=$('toast');t.innerHTML=msg;t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),2000);}
+function showTutorial(){$('tutorialOverlay').style.display='block';}
+function closeTutorial(){$('tutorialOverlay').style.display='none';}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeHex();closeTutorial();}});
+
+init();
+</script>
+</body>
+</html>

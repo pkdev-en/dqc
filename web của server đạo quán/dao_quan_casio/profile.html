@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Đạo Quán Casio · Profile</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&family=Cinzel+Decorative:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#000;--bg2:#0a0a0a;--surface:#111;--surface2:#1a1a1a;--border:#222;--text:#e0e0e0;--text2:#666;--accent:#fff;--accent2:#ccc;--font:'JetBrains Mono',monospace;--font2:'Cinzel Decorative',serif}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--font);overflow-x:hidden}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* ── SPLASH ── */
+#splash{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);cursor:pointer;transition:opacity .8s}
+#splash.fade{opacity:0;pointer-events:none}
+#splash.hide{display:none}
+.splash-logo{width:180px;height:180px;position:relative;animation:splashPulse 2s ease-in-out infinite}
+.splash-logo img{width:100%;height:100%;object-fit:contain;filter:brightness(0) invert(1)}
+@keyframes splashPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.05);opacity:.8}}
+.splash-ring{position:absolute;inset:-20px;border:1px solid rgba(255,255,255,.1);border-radius:50%;animation:spin 8s linear infinite}
+.splash-ring:nth-child(2){inset:-35px;animation:spin 12s linear infinite reverse;border-color:rgba(255,255,255,.05)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.splash-text{font-family:var(--font2);font-size:.6rem;letter-spacing:.4em;color:var(--text2);margin-top:30px;text-transform:uppercase;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.splash-sub{font-size:.5rem;letter-spacing:.25em;color:rgba(255,255,255,.15);margin-top:8px}
+
+/* ── PARTICLES CANVAS ── */
+#particles{position:fixed;inset:0;pointer-events:none;z-index:0}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:16px 30px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(180deg,rgba(0,0,0,.95) 0%,transparent 100%);pointer-events:none}
+nav>*{pointer-events:auto}
+.nav-logo{font-family:var(--font2);font-size:.7rem;letter-spacing:.2em;color:var(--text2);text-transform:uppercase}
+.nav-logo span{color:var(--text)}
+.nav-links{display:flex;gap:24px;list-style:none}
+.nav-links a{color:var(--text2);text-decoration:none;font-size:.65rem;letter-spacing:.12em;transition:color .3s;position:relative}
+.nav-links a:hover{color:var(--text)}
+.nav-links a::after{content:'';position:absolute;bottom:-3px;left:0;width:0;height:1px;background:var(--text);transition:width .3s}
+.nav-links a:hover::after{width:100%}
+
+/* ── HERO ── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;z-index:1;padding:80px 20px}
+.hero-logo{width:220px;height:220px;margin-bottom:24px;position:relative;animation:float 5s ease-in-out infinite;filter:drop-shadow(0 0 30px rgba(255,255,255,.08))}
+.hero-logo img{width:100%;height:100%;object-fit:contain;filter:brightness(0) invert(1)}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.hero-logo::before{content:'';position:absolute;inset:-30px;border:1px solid rgba(255,255,255,.06);border-radius:50%;animation:spin 15s linear infinite}
+.hero-title{font-family:var(--font2);font-size:1.8rem;letter-spacing:.12em;color:var(--text);text-align:center;margin-bottom:8px;text-shadow:0 0 40px rgba(255,255,255,.1)}
+.hero-sub{font-size:.7rem;letter-spacing:.3em;color:var(--text2);text-align:center;margin-bottom:4px;text-transform:uppercase}
+.hero-tagline{font-size:.55rem;letter-spacing:.15em;color:rgba(255,255,255,.2);text-align:center;margin-bottom:30px}
+
+/* ── SCROLL INDICATOR ── */
+.scroll-ind{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;animation:scrollBounce 2s ease-in-out infinite}
+.scroll-ind span{font-size:.5rem;letter-spacing:.12em;color:var(--text2)}
+.scroll-line{width:1px;height:30px;background:linear-gradient(to bottom,var(--text2),transparent)}
+@keyframes scrollBounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(6px)}}
+
+/* ── SECTIONS ── */
+section{padding:80px 20px;position:relative;z-index:1}
+.section-inner{max-width:900px;margin:0 auto}
+.section-title{font-family:var(--font2);font-size:.7rem;letter-spacing:.32em;color:var(--text);text-transform:uppercase;text-align:center;margin-bottom:8px}
+.section-line{width:40px;height:1px;background:var(--text2);margin:0 auto 40px}
+
+/* ── ACHIEVEMENTS ── */
+.ach-list{display:flex;flex-direction:column;gap:10px}
+.ach-item{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;transition:all .4s}
+.ach-item:hover{border-color:var(--text2);transform:translateX(4px)}
+.ach-year{font-size:.55rem;color:var(--text2);letter-spacing:.1em;white-space:nowrap;flex-shrink:0;width:50px}
+.ach-icon{font-size:1rem;flex-shrink:0;width:20px;text-align:center}
+.ach-text{font-size:.7rem;color:var(--text);flex:1}
+.ach-text small{color:var(--text2);font-size:.6rem}
+
+/* ── SOCIAL ── */
+.social-row{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:12px}
+.social-link{display:flex;align-items:center;gap:8px;padding:10px 18px;border:1px solid var(--border);border-radius:6px;text-decoration:none;color:var(--text2);font-size:.65rem;transition:all .3s}
+.social-link:hover{color:var(--text);border-color:var(--text2);transform:translateY(-2px)}
+
+/* ── FOOTER ── */
+footer{padding:30px 20px;text-align:center;position:relative;z-index:1;border-top:1px solid var(--border);font-size:.55rem;color:var(--text2);letter-spacing:.12em}
+
+/* ── ANIMATIONS ── */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity .6s,transform .6s}
+.reveal.visible{opacity:1;transform:translateY(0)}
+
+/* ── RESPONSIVE ── */
+@media(max-width:640px){
+  .hero-title{font-size:1.2rem}
+  .nav-links{display:none}
+}
+</style>
+</head>
+<body>
+
+<canvas id="particles"></canvas>
+
+<div id="splash">
+  <div class="splash-logo">
+    <div class="splash-ring"></div>
+    <div class="splash-ring"></div>
+    <img src="img/logo3.png" alt="Đạo Quán Casio">
+  </div>
+  <div class="splash-text">✦ Click để vào ✦</div>
+  <div class="splash-sub">Đạo Quán Casio</div>
+</div>
+
+<nav>
+  <div class="nav-logo"><span>✦</span> ĐẠO QUÁN CASIO</div>
+  <ul class="nav-links">
+    <li><a href="/">Trang chính</a></li>
+    <li><a href="#achievements">Achievements</a></li>
+    <li><a href="#contact">Contact</a></li>
+  </ul>
+</nav>
+
+<section class="hero">
+  <div class="hero-logo">
+    <img src="img/logo3.png" alt="Đạo Quán Casio">
+  </div>
+  <div class="hero-title">Đạo Quán Casio</div>
+  <div class="hero-sub">We are coding "Casio"</div>
+  <div class="hero-sub">We are coding "ROP" (assembly)</div>
+  <div class="hero-tagline">Return-Oriented Programming · Reverse Engineering · Exploit</div>
+  <div class="scroll-ind">
+    <span>Scroll</span>
+    <div class="scroll-line"></div>
+  </div>
+</section>
+
+<section id="achievements">
+  <div class="section-inner">
+    <div class="section-title">✦ Thành Tựu</div>
+    <div class="section-line"></div>
+    <div class="ach-list">
+      <div class="ach-item reveal">
+        <div class="ach-year">2026</div>
+        <div class="ach-icon">🏆</div>
+        <div class="ach-text">HSG Tỉnh <small>· Giải Khuyến Khích</small></div>
+      </div>
+      <div class="ach-item reveal">
+        <div class="ach-year">2026</div>
+        <div class="ach-icon">🤖</div>
+        <div class="ach-text">Casio AI Discord Bot <small>· 500+ gadgets, decompiler, compiler, p2b</small></div>
+      </div>
+      <div class="ach-item reveal">
+        <div class="ach-year">2026</div>
+        <div class="ach-icon">🌐</div>
+        <div class="ach-text">Web Đạo Quán Casio <small>· React realtime chat, Discord OAuth, Firestore</small></div>
+      </div>
+      <div class="ach-item reveal">
+        <div class="ach-year">2026</div>
+        <div class="ach-icon">📝</div>
+        <div class="ach-text">ROP Guide cho Casio 580 <small>· Tài liệu hướng dẫn ROP tiếng Việt</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="contact">
+  <div class="section-inner">
+    <div class="section-title">✦ Liên Hệ</div>
+    <div class="section-line"></div>
+    <div class="hero-sub" style="font-size:.6rem;margin-bottom:4px">Join the cult of Casio hacking</div>
+    <div class="hero-tagline" style="margin-bottom:0">#ĐạoQuánCasio</div>
+    <div class="social-row">
+      <a class="social-link" href="https://discord.gg/8PDhggCApb" target="_blank">☄️ Discord</a>
+      <a class="social-link" href="https://github.com/your-profile" target="_blank">💻 GitHub</a>
+      <a class="social-link" href="https://www.facebook.com/profile.php?id=61573307350981&locale=vi_VN" target="_blank">📘 Facebook</a>
+      <a class="social-link" href="mailto:daoquancasio@gmail.com" target="_blank">✉️ Email</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>© 2026 Đạo Quán Casio · We are coding "ROP" (assembly)</p>
+</footer>
+
+<script>
+// === SPLASH ===
+document.getElementById('splash').addEventListener('click', function(){
+  this.classList.add('fade');
+  setTimeout(() => this.classList.add('hide'), 800);
+}, {once: true});
+setTimeout(() => {
+  const s = document.getElementById('splash');
+  s.classList.add('fade');
+  setTimeout(() => s.classList.add('hide'), 800);
+}, 3000);
+
+// === PARTICLES ===
+const c = document.getElementById('particles');
+const ctx = c.getContext('2d');
+let W, H;
+function resize(){ W = c.width = window.innerWidth; H = c.height = window.innerHeight; }
+resize(); window.addEventListener('resize', resize);
+
+const pts = Array.from({length: 80}, () => ({
+  x: Math.random() * W, y: Math.random() * H,
+  vx: (Math.random() - .5) * .3, vy: (Math.random() - .5) * .3,
+  r: Math.random() * 1.5 + .5
+}));
+
+function drawParticles(){
+  ctx.clearRect(0, 0, W, H);
+  pts.forEach((p, i) => {
+    p.x += p.vx; p.y += p.vy;
+    if(p.x < 0) p.x = W; if(p.x > W) p.x = 0;
+    if(p.y < 0) p.y = H; if(p.y > H) p.y = 0;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,.15)';
+    ctx.fill();
+    // Lines
+    for(let j = i+1; j < pts.length; j++){
+      const dx = p.x - pts[j].x, dy = p.y - pts[j].y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if(dist < 120){
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(pts[j].x, pts[j].y);
+        ctx.strokeStyle = `rgba(255,255,255,${.06 * (1 - dist/120)})`;
+        ctx.stroke();
+    }
+  }
+});
+  requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+// === SCROLL REVEAL ===
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: .1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

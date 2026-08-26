@@ -1,0 +1,18 @@
+org 0xe9e0
+start:
+    buffer_clear
+    setlr
+    setsfr
+
+ve_vong_tron:
+    xr0 = hex 14 14 10 10
+    render_bitmap
+
+    er0 = adr_of circle_bmp
+    
+    render.ddd4
+circle_bmp:
+    hex 07 E0 18 18 20 04 40 02
+    hex 40 02 80 01 80 01 80 01
+    hex 80 01 80 01 80 01 40 02
+    hex 40 02 20 04 18 18 07 E0

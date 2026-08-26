@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hex Tools · Đạo Quán Casio</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&family=Cinzel+Decorative:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#030303;--fg:#e2e8f0;--white:#fff;--gray:#888;--card-bg:rgba(15,15,20,.4);--dark:#111;--font:'JetBrains Mono',monospace;--font2:'Cinzel Decorative',serif}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+nav{background:rgba(15,15,20,.6);color:var(--fg);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(8px);border-bottom:1px solid rgba(255,255,255,.06)}
+.nav-logo{font-family:var(--font2);font-size:.65rem;letter-spacing:.2em;color:var(--fg)}
+.nav-logo span{color:var(--gray)}
+.nav-back{color:var(--gray);text-decoration:none;font-size:.55rem;letter-spacing:.12em;padding:4px 10px;border:1px solid rgba(255,255,255,.15);border-radius:3px;transition:all .3s}
+.nav-back:hover{color:var(--white);border-color:var(--white)}
+.hero{padding:50px 24px 30px;text-align:center;border-bottom:1px solid rgba(255,255,255,.06)}
+.hero-title{font-family:var(--font2);font-size:1.1rem;letter-spacing:.12em;margin-bottom:4px;color:var(--fg)}
+.hero-sub{font-size:.55rem;letter-spacing:.2em;opacity:.5;text-transform:uppercase}
+.tool-area{flex:1;padding:24px;max-width:960px;margin:0 auto;width:100%}
+
+/* TABS */
+.tab-bar{display:flex;gap:0;margin-bottom:16px;border:1px solid #333;border-radius:6px;overflow:hidden}
+.tab-btn{flex:1;padding:8px 12px;text-align:center;font-size:.6rem;font-weight:700;letter-spacing:.1em;cursor:pointer;background:var(--dark);color:var(--gray);border:none;transition:all .15s;font-family:var(--font)}
+.tab-btn:not(:last-child){border-right:1px solid #333}
+.tab-btn.active{background:rgba(255,255,255,.9);color:var(--bg)}
+.tab-pane{display:none;flex-direction:column;gap:14px}
+.tab-pane.active{display:flex}
+
+.input-group{display:flex;flex-direction:column;gap:6px}
+.input-group label{font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.4;color:var(--gray)}
+textarea{width:100%;min-height:100px;background:var(--dark);color:#0f0;border:1px solid #222;border-radius:6px;padding:12px;font-family:var(--font);font-size:.7rem;line-height:1.5;resize:vertical;outline:none}
+textarea:focus{border-color:rgba(255,255,255,.2)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{background:transparent;color:var(--fg);border:1px solid rgba(255,255,255,.2);padding:7px 16px;font-family:var(--font);font-size:.6rem;letter-spacing:.1em;cursor:pointer;border-radius:4px;transition:all .3s;font-weight:700}
+.btn:hover{background:rgba(255,255,255,.08);border-color:var(--white)}
+.btn-dark{background:rgba(255,255,255,.05);color:var(--gray);border:1px solid rgba(255,255,255,.1)}
+.btn-dark:hover{background:rgba(255,255,255,.1);border-color:var(--gray)}
+.output-area{background:var(--bg);color:#0f0;border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:12px;min-height:80px;font-family:var(--font);font-size:.7rem;line-height:1.6;white-space:pre-wrap;overflow:auto}
+.stats{font-size:.55rem;color:var(--gray);opacity:.6}
+.ctrl-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ctrl-row label{font-size:.55rem;opacity:.6}
+.ctrl-row input[type=number]{width:60px;background:var(--dark);border:1px solid rgba(255,255,255,.1);color:var(--fg);padding:4px 6px;border-radius:3px;font-family:var(--font);font-size:.6rem}
+.ctrl-row input[type=number]:focus{border-color:rgba(255,255,255,.3);outline:none}
+@media(max-width:600px){.tool-area{padding:16px};.tab-btn{font-size:.5rem;padding:6px}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo"><span>✦</span> Hex Tools</div>
+  <a class="nav-back" href="/">← Back</a>
+</nav>
+
+<div class="hero">
+  <div class="hero-title">📐 Hex Tools</div>
+  <div class="hero-sub">Dịch hex · Gán hex · Split · Format · H2I · Offset</div>
+</div>
+
+<div class="tool-area">
+  <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="dich">Dịch Hex</button>
+    <button class="tab-btn" data-tab="gan">Gán Hex</button>
+    <button class="tab-btn" data-tab="split">Split</button>
+    <button class="tab-btn" data-tab="format">Format</button>
+    <button class="tab-btn" data-tab="offset">Offset</button>
+    <button class="tab-btn" data-tab="h2i">H2I</button>
+  </div>
+
+  <!-- DỊCH HEX -->
+  <div class="tab-pane active" id="pane-dich">
+    <div class="input-group">
+      <label>Hex Input → Dich ra bytes, swap endian, etc.</label>
+      <textarea id="dichInput" placeholder="VD: FD 24 30 30 0D 24 30 30"></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="dichHex()">▶ Dịch</button>
+      <button class="btn btn-dark" onclick="document.getElementById('dichInput').value=''">✕ Clear</button>
+    </div>
+    <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.4;color:var(--gray)">Output</label>
+    <div class="output-area" id="dichOutput">Nhập hex và nhấn Dịch...</div>
+  </div>
+
+  <!-- GÁN HEX -->
+  <div class="tab-pane" id="pane-gan">
+    <div class="input-group">
+      <label>Hex → Format đẹp, chuẩn Casio</label>
+      <textarea id="ganInput" placeholder="Hex thô: FD2430300D243030"></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="ganHex()">▶ Gán</button>
+      <button class="btn btn-dark" onclick="document.getElementById('ganInput').value=''">✕ Clear</button>
+    </div>
+    <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.6">Output</label>
+    <div class="output-area" id="ganOutput">Nhập hex và nhấn Gán...</div>
+  </div>
+
+  <!-- SPLIT -->
+  <div class="tab-pane" id="pane-split">
+    <div class="input-group">
+      <label>Split hex thành nhiều dòng</label>
+      <textarea id="splitInput" placeholder="Hex: FD 24 30 30 0D 24 30 30 ..."></textarea>
+    </div>
+    <div class="ctrl-row">
+      <label>Bytes/dòng:</label>
+      <input type="number" id="splitN" value="16" min="1" max="64">
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="splitHex()">▶ Split</button>
+      <button class="btn btn-dark" onclick="document.getElementById('splitInput').value=''">✕ Clear</button>
+    </div>
+    <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.6">Output</label>
+    <div class="output-area" id="splitOutput">Nhập hex và nhấn Split...</div>
+  </div>
+
+  <!-- FORMAT -->
+  <div class="tab-pane" id="pane-format">
+    <div class="input-group">
+      <label>Format hex → little-endian + comment</label>
+      <textarea id="fmtInput" placeholder="Hex: FD 24 30 30 0D 24 30 30"></textarea>
+    </div>
+    <div class="ctrl-row">
+      <label>Địa chỉ bắt đầu (hex):</label>
+      <input type="number" id="fmtAddr" value="55088" min="0">
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="formatHex()">▶ Format</button>
+      <button class="btn btn-dark" onclick="document.getElementById('fmtInput').value=''">✕ Clear</button>
+    </div>
+    <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.6">Output</label>
+    <div class="output-area" id="fmtOutput">Nhập hex và nhấn Format...</div>
+  </div>
+
+  <!-- OFFSET -->
+  <div class="tab-pane" id="pane-offset">
+    <div class="input-group">
+      <label>Tính offset / địa chỉ bộ nhớ</label>
+    </div>
+    <div class="ctrl-row">
+      <label>Địa chỉ base (hex):</label>
+      <input type="number" id="offBase" value="55088" min="0">
+      <label>Offset (hex):</label>
+      <input type="number" id="offVal" value="0" min="0">
+      <label>+ / - :</label>
+      <select id="offOp" style="background:var(--dark);color:var(--fg);border:1px solid rgba(255,255,255,.15);padding:4px;border-radius:3px;font-family:var(--font)">
+        <option value="+">+</option>
+        <option value="-">-</option>
+      </select>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="calcOffset()">▶ Tính</button>
+    </div>
+    <label style="font-size:.6rem;letter-spacing:.15em;text-transform:uppercase;opacity:.6">Kết quả</label>
+    <div class="output-area" id="offOutput">Nhập thông số và nhấn Tính...</div>
+  </div>
+
+  <!-- H2I -->
+  <div class="tab-pane" id="pane-h2i">
+    <div class="input-group">
+      <label>Hex → Image (bitmap Casio 192x63)</label>
+      <textarea id="h2iInput" placeholder="Hex bitmap: FD2430300D243030...&#10;hoặc: FD 24 30 30 0D 24 30 30"></textarea>
+    </div>
+    <div class="ctrl-row">
+      <label>Rộng:</label>
+      <input type="number" id="h2iW" value="192" min="1" max="512">
+      <label>Cao:</label>
+      <input type="number" id="h2iH" value="63" min="1" max="512">
+      <label>Threshold:</label>
+      <input type="number" id="h2iT" value="128" min="0" max="255">
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="h2i()">▶ Vẽ</button>
+      <button class="btn btn-dark" onclick="clearH2I()">✕ Clear</button>
+    </div>
+    <canvas id="h2iCanvas" style="max-width:100%;border:1px solid rgba(255,255,255,.08);border-radius:4px;background:#000;image-rendering:pixelated"></canvas>
+  </div>
+</div>
+
+<script>
+function hexToBytes(h) {
+  let c = h.replace(/[^0-9a-fA-F]/g,'');
+  if (!c || c.length%2) return [];
+  let r = [];
+  for (let i=0;i<c.length;i+=2) r.push(parseInt(c.substr(i,2),16));
+  return r;
+}
+function bytesToHex(b,sep) {
+  return b.map(x=>x.toString(16).padStart(2,'0')).join(sep||' ');
+}
+function getText(id) { return document.getElementById(id).value.trim(); }
+function setOut(id,text) { document.getElementById(id).textContent = text; }
+
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('pane-'+btn.dataset.tab).classList.add('active');
+  });
+});
+
+// Dịch Hex
+function dichHex() {
+  let input = getText('dichInput');
+  if (!input) { setOut('dichOutput','❌ Nhập hex.'); return; }
+  let b = hexToBytes(input);
+  if (!b.length) { setOut('dichOutput','❌ Hex không hợp lệ.'); return; }
+  let out = `Bytes: ${b.join(' ')}\n`;
+  out += `Length: ${b.length} bytes\n`;
+  out += `Hex string: ${b.map(x=>x.toString(16).padStart(2,'0')).join('')}\n`;
+  out += `Decimal: ${b.join(', ')}\n`;
+  out += `Little-endian 16-bit: `;
+  for (let i=0;i<b.length-1;i+=2) out += ((b[i+1]<<8)|b[i]).toString(16).padStart(4,'0')+' ';
+  setOut('dichOutput', out);
+}
+
+// Gán Hex
+function ganHex() {
+  let input = getText('ganInput');
+  if (!input) { setOut('ganOutput','❌ Nhập hex.'); return; }
+  let b = hexToBytes(input);
+  if (!b.length) { setOut('ganOutput','❌ Hex không hợp lệ.'); return; }
+  let out = bytesToHex(b,' ') + '\n\n';
+  out += `// ${b.length} bytes\n`;
+  let lines = [];
+  for (let i=0;i<b.length;i+=16) {
+    let chunk = b.slice(i,i+16);
+    let hex = chunk.map(x=>x.toString(16).padStart(2,'0')).join(' ');
+    let asc = chunk.map(x=>x>=32&&x<=126?String.fromCharCode(x):'.').join('');
+    lines.push(`  ${i.toString(16).padStart(4,'0')}: ${hex.padEnd(47)}  ; ${asc}`);
+  }
+  out += lines.join('\n');
+  setOut('ganOutput', out);
+}
+
+// Split
+function splitHex() {
+  let input = getText('splitInput');
+  if (!input) { setOut('splitOutput','❌ Nhập hex.'); return; }
+  let b = hexToBytes(input);
+  if (!b.length) { setOut('splitOutput','❌ Hex không hợp lệ.'); return; }
+  let n = parseInt(document.getElementById('splitN').value) || 16;
+  let out = '';
+  for (let i=0;i<b.length;i+=n) {
+    let chunk = b.slice(i,i+n);
+    out += chunk.map(x=>x.toString(16).padStart(2,'0')).join(' ') + '\n';
+  }
+  setOut('splitOutput', out);
+}
+
+// Format
+function formatHex() {
+  let input = getText('fmtInput');
+  if (!input) { setOut('fmtOutput','❌ Nhập hex.'); return; }
+  let b = hexToBytes(input);
+  if (!b.length) { setOut('fmtOutput','❌ Hex không hợp lệ.'); return; }
+  let addr = parseInt(document.getElementById('fmtAddr').value) || 0xD730;
+  let out = '';
+  for (let i=0;i<b.length;i+=4) {
+    let chunk = b.slice(i,i+4);
+    if (chunk.length<4) {
+      out += `${(addr).toString(16).padStart(5,'0')}: ${chunk.map(x=>x.toString(16).padStart(2,'0')).join(' ').padEnd(11)}  ; ${chunk.length} bytes\n`;
+    } else {
+      let word = chunk[0]|chunk[1]<<8;
+      let gadget = GADGET_MAP[word] || GADGET_MAP[(addr&0xFFFF)] || '';
+      out += `${(addr).toString(16).padStart(5,'0')}: ${chunk.map(x=>x.toString(16).padStart(2,'0')).join(' ').padEnd(11)}  ; ${gadget||'data'}\n`;
+    }
+    addr += chunk.length;
+  }
+  setOut('fmtOutput', out);
+}
+
+// Offset
+function calcOffset() {
+  let base = parseInt(document.getElementById('offBase').value) || 0;
+  let off = parseInt(document.getElementById('offVal').value) || 0;
+  let op = document.getElementById('offOp').value;
+  let result = op === '+' ? base + off : base - off;
+  let out = `Base: 0x${base.toString(16).toUpperCase()}\n`;
+  out += `Offset: 0x${off.toString(16).toUpperCase()} (${off})\n`;
+  out += `Operation: ${op}\n`;
+  out += `Result: 0x${result.toString(16).toUpperCase()} (${result})\n`;
+  out += `\nJump distance from base: ${Math.abs(result-base)} bytes`;
+  setOut('offOutput', out);
+}
+
+// H2I
+function h2i() {
+  let input = getText('h2iInput');
+  if (!input) { setOut('?',''); return; }
+  let b = hexToBytes(input);
+  if (!b.length) return;
+  let w = parseInt(document.getElementById('h2iW').value) || 192;
+  let h = parseInt(document.getElementById('h2iH').value) || 63;
+  let t = parseInt(document.getElementById('h2iT').value) || 128;
+  let canvas = document.getElementById('h2iCanvas');
+  canvas.width = w; canvas.height = h;
+  let ctx = canvas.getContext('2d');
+  let img = ctx.createImageData(w,h);
+  for (let y=0;y<h;y++) {
+    for (let x=0;x<w;x++) {
+      let byteI = y * Math.ceil(w/8) + Math.floor(x/8);
+      let bit = 7 - (x%8);
+      let p = (byteI < b.length) ? ((b[byteI]>>bit)&1) : 0;
+      let v = p ? 0 : 255;
+      let i = (y*w+x)*4;
+      img.data[i]=v; img.data[i+1]=v; img.data[i+2]=v; img.data[i+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+function clearH2I() {
+  document.getElementById('h2iInput').value='';
+  let c=document.getElementById('h2iCanvas');
+  c.getContext('2d').clearRect(0,0,c.width,c.height);
+}
+
+// Minimal GADGET_MAP for format tool
+const GADGET_MAP = {
+  0x09fa8:"setlr",0x13332:"pop er0,rt",0x27030:"pop er14,rt",0x16078:"er0+=1,rt",
+  0x09ce4:"r0+=1,rt",0x0a8a8:"nop",0x0bf30:"er0=er2,rt",0x0eda0:"er0=0,rt",
+  0x1DD54:"r0=0,rt",0x1DD58:"r0=1,rt",0x1e60c:"er0=1,rt",0x0a0a8:"rt",
+  0x09e8a:"er0-=er2,rt",0x09e98:"r0-=1,rt",0x2702e:"sp=er14,pop er14,rt",
+  0x0ac34:"er14=sp,rt",0x0ac38:"LEAVE",0x0ac30:"ENTER",0x24836:"B LEAVE",
+  0x09450:"BL memcpy,pop er0",0x203CC:"BL strcpy",0x09D3A:"BL memset,pop er2",
+  0x26FFA:"memcpy",0x0E5C8:"strcpy",0x1EB94:"memset",0x29A2C:"strlen",
+  0x13324:"pop pc"
+};
+</script>
+</body>
+</html>

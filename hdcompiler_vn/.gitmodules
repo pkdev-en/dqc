@@ -1,0 +1,6 @@
+[submodule "CasioEmu"]
+	path = CasioEmu
+	url = https://github.com/user202729/CasioEmu
+[submodule "suika-compiler"]
+	path = suika-compiler
+	url = https://github.com/thatfrozenfrog/suika-compiler.git
