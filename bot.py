@@ -86,10 +86,10 @@ def split_message(text, max_len=2000):
     return chunks
 
 ALLOWED_FILES = [".env", "persona.txt", "knowledge.txt", "knowledge_learned.txt"]
-ALLOWED_FILE_USERS = [1426570746125221929, 1046054858580561960, 1358317538869776395]
+ALLOWED_FILE_USERS = [1173632231474995281, 1046054858580561960, 1358317538869776395]
 SPECIAL_USERS = {
     1358317538869776395: "chủ server",
-    1426570746125221929: "nhà phát triển bot",
+    1173632231474995281: "nhà phát triển bot",
 }
 CONTRIBUTOR_ROLES = ["trưởng lão", "công thần"]
 API_KEYS_FILE = "api_keys.txt"
@@ -1161,7 +1161,7 @@ async def help_cmd(ctx):
     embed.add_field(name="🖼️ P2B & Hex Tools", value="`c!p2b` / `c!p` - P2B Pro: Ảnh ⇄ Bitmap Hex\n`c!dichhex <hex>` - Dịch hex → ảnh bitmap\n`c!ganhex <hex>` - Format hex đẹp, chuẩn Casio\n`c!h2i [WxH] <hex>` - Hex → Image (tuỳ size)\n`c!hexsplit <hex>` - Split hex thành dòng", inline=False)
     embed.add_field(name="🔧 API Keys", value="`c!api <key>` - Set API key hiện tại\n`c!addkey <key>` - Thêm API key mới\n`c!addkeyat <index> <key>` - Ghi đè key tại vị trí\n`c!keys` - Xem danh sách API key\n`c!model <model>` - Đổi model AI", inline=False)
     embed.add_field(name="⚙️ Hệ thống", value="`c!reset` - Reset toàn bộ bot\n`c!restart` - Khởi động lại bot\n`c!file` - Quản lý file (list/view/delete)\n`c!console <#kênh>` - Bật console debug\n`c!help` - Xem danh sách lệnh", inline=False)
-    embed.set_footer(text="Casio Dao Truong · @Stacked · 24 lệnh")
+    embed.set_footer(text="Casio Đạo Trưởng · @Stacked · 24 lệnh | v2.0")
     await ctx.reply(embed=embed)
 
 @bot.command(name="leave")
