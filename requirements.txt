@@ -4,3 +4,4 @@ python-dotenv>=1.0.0
 Pillow>=10.0.0
 numpy>=1.24.0
 opencv-python>=4.10.0
+openai>=3.19.2
