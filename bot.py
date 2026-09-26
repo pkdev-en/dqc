@@ -1,8 +1,7 @@
 import threading, http.server
 import discord
 from discord.ext import commands, tasks
-import google.genai as genai
-from google.genai import types
+from openai import AsyncOpenAI
 import os
 import sys
 import subprocess
@@ -32,8 +31,9 @@ dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(dotenv_path)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL = os.getenv("MODEL", "gpt-4o-mini")
+API_KEY = os.getenv("API_KEY")
+BASE_URL = os.getenv("BASE_URL", "https://sarsed.eu.cc/v1")
+MODEL = os.getenv("MODEL", "oc/union-alpha")
 KNOWLEDGE_FILE = os.getenv("KNOWLEDGE_FILE", "knowledge.txt")
 LEARNED_KNOWLEDGE_FILE = "knowledge_learned.txt"
 CHANNELS_FILE = "joined_channels.json"
@@ -203,33 +203,47 @@ def switch_api_key():
     global api_key_index, GEMINI_API_KEY, genai_client
     api_key_index = (api_key_index + 1) % len(api_keys)
     GEMINI_API_KEY = api_keys[api_key_index]
-    genai_client = genai.Client(api_key=GEMINI_API_KEY)
+    genai_client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
     save_key_index(api_key_index)
     print(f"[API] Đã chuyển sang key #{api_key_index}")
 
-async def call_gemini(model, contents, config=None, max_retries=None):
+async def call_gemini(model, contents, config=None, max_retries=1):
     global api_exhausted_until
+
     now = time.time()
     if now < api_exhausted_until:
-        raise Exception(f"API đang trong thời gian chờ, thử lại sau {int(api_exhausted_until - now)}s")
-    if max_retries is None:
-        max_retries = len(api_keys)
-    last_err = None
+        raise Exception(
+            f"API đang trong thời gian chờ, thử lại sau "
+            f"{int(api_exhausted_until - now)}s"
+        )
+
     for attempt in range(max_retries):
         try:
-            return await genai_client.aio.models.generate_content(
-                model=model, contents=contents, config=config
+            response = await genai_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": contents
+                    }
+                ]
             )
+
+            return type(
+                "Response",
+                (),
+                {
+                    "text": response.choices[0].message.content or ""
+                }
+            )()
+
         except Exception as e:
-            err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                print(f"[API] Key #{api_key_index} hết quota, đang chuyển...")
-                switch_api_key()
-                last_err = e
-                continue
-            raise
-    api_exhausted_until = now + 60
-    raise last_err or Exception("Tất cả API keys đều hết quota")
+            print(f"[API] Lỗi: {e}")
+
+            if attempt + 1 >= max_retries:
+                raise
+
+            await asyncio.sleep(1)
 
 def load_joined_channels():
     try:
@@ -334,13 +348,17 @@ async def study(ctx, limit: int = 1000):
 
 @bot.command(name="api")
 async def api(ctx, *, api_key):
-    global GEMINI_API_KEY, genai_client, api_keys, api_key_index
-    GEMINI_API_KEY = api_key
-    api_keys = [api_key]
-    api_key_index = 0
-    genai_client = genai.Client(api_key=GEMINI_API_KEY)
-    save_key_index(0)
-    update_env_var("GEMINI_API_KEY", api_key)
+    global API_KEY, genai_client
+
+    API_KEY = api_key.strip()
+
+    genai_client = AsyncOpenAI(
+        api_key=API_KEY,
+        base_url=BASE_URL
+    )
+
+    update_env_var("API_KEY", API_KEY)
+
     await ctx.reply("✅ Đã cập nhật API key thành công!")
 
 @bot.command(name="model")
