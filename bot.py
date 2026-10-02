@@ -1,7 +1,8 @@
 import threading, http.server
 import discord
 from discord.ext import commands, tasks
-from openai import AsyncOpenAI
+import google.genai as genai
+from google.genai import types
 import os
 import sys
 import subprocess
@@ -32,8 +33,7 @@ load_dotenv(dotenv_path)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 API_KEY = os.getenv("API_KEY")
-BASE_URL = os.getenv("BASE_URL", "https://sarsed.eu.cc/v1")
-MODEL = os.getenv("MODEL", "oc/union-alpha")
+MODEL = os.getenv("MODEL", "gpt-4o-mini")
 KNOWLEDGE_FILE = os.getenv("KNOWLEDGE_FILE", "knowledge.txt")
 LEARNED_KNOWLEDGE_FILE = "knowledge_learned.txt"
 CHANNELS_FILE = "joined_channels.json"
@@ -88,10 +88,10 @@ def split_message(text, max_len=2000):
 ALLOWED_FILES = [".env", "persona.txt", "knowledge.txt", "knowledge_learned.txt"]
 ALLOWED_FILE_USERS = [1173632231474995281, 1046054858580561960, 1358317538869776395]
 SPECIAL_USERS = {
-    1358317538869776395: "chủ server",
-    1173632231474995281: "nhà phát triển bot",
+    1358317538869776395: "chá»§ server",
+    1173632231474995281: "nhÃ  phÃ¡t triá»ƒn bot",
 }
-CONTRIBUTOR_ROLES = ["trưởng lão", "công thần"]
+CONTRIBUTOR_ROLES = ["trÆ°á»Ÿng lÃ£o", "cÃ´ng tháº§n"]
 API_KEYS_FILE = "api_keys.txt"
 API_KEY_INDEX_FILE = "api_key_index.txt"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -131,9 +131,9 @@ def load_api_keys():
     try:
         with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
             keys = [line.strip() for line in f if line.strip()]
-        return keys if keys else [GEMINI_API_KEY]
+        return keys if keys else ([API_KEY] if API_KEY else [])
     except FileNotFoundError:
-        return [GEMINI_API_KEY]
+        return [API_KEY] if API_KEY else []
 
 def load_key_index():
     try:
@@ -149,18 +149,21 @@ def save_key_index(idx):
     except:
         pass
 
+if not API_KEY:
+    print("LỖI: Chưa cấu hình API_KEY trong Environment Variables/.env")
+
 api_keys = load_api_keys()
 api_key_index = load_key_index()
 if api_key_index >= len(api_keys):
     api_key_index = 0
-GEMINI_API_KEY = api_keys[api_key_index]
+API_KEY = api_keys[api_key_index]
 
 KNOWLEDGE_BASE = load_file(KNOWLEDGE_FILE)
 KNOWLEDGE_LEARNED = load_file(LEARNED_KNOWLEDGE_FILE)
 PERSONA = load_file(PERSONA_FILE)
 
 if not PERSONA:
-    PERSONA = "Bạn là một trợ lý ảo Discord thân thiện, thông minh và hài hước."
+    PERSONA = "Báº¡n lÃ  má»™t trá»£ lÃ½ áº£o Discord thÃ¢n thiá»‡n, thÃ´ng minh vÃ  hÃ i hÆ°á»›c."
 
 def refresh_globals(filename):
     global KNOWLEDGE_BASE, KNOWLEDGE_LEARNED, PERSONA
@@ -174,9 +177,9 @@ def refresh_globals(filename):
 def get_full_knowledge():
     parts = []
     if KNOWLEDGE_BASE:
-        parts.append(f"Kiến thức gốc:\n{KNOWLEDGE_BASE}")
+        parts.append(f"Kiáº¿n thá»©c gá»‘c:\n{KNOWLEDGE_BASE}")
     if KNOWLEDGE_LEARNED:
-        parts.append(f"Kiến thức học được từ người dùng:\n{KNOWLEDGE_LEARNED}")
+        parts.append(f"Kiáº¿n thá»©c há»c Ä‘Æ°á»£c tá»« ngÆ°á»i dÃ¹ng:\n{KNOWLEDGE_LEARNED}")
     return "\n\n".join(parts)
 
 def get_system_prompt():
@@ -189,61 +192,47 @@ def get_user_context(member):
     if not member:
         return ""
     lines = []
-    lines.append(f"Tên người dùng: {member.display_name}")
+    lines.append(f"TÃªn ngÆ°á»i dÃ¹ng: {member.display_name}")
     uid = member.id
     if uid in SPECIAL_USERS:
-        lines.append(f"Danh hiệu: {SPECIAL_USERS[uid]}")
+        lines.append(f"Danh hiá»‡u: {SPECIAL_USERS[uid]}")
     user_roles = [r.name for r in member.roles if r.name != "@everyone"]
     contributor_roles_found = [r for r in user_roles if r.lower() in CONTRIBUTOR_ROLES]
     if contributor_roles_found:
-        lines.append(f"Vai trò trong server: {', '.join(contributor_roles_found)}")
+        lines.append(f"Vai trÃ² trong server: {', '.join(contributor_roles_found)}")
     return "\n".join(lines)
 
 def switch_api_key():
-    global api_key_index, GEMINI_API_KEY, genai_client
+    global api_key_index, API_KEY, genai_client
     api_key_index = (api_key_index + 1) % len(api_keys)
-    GEMINI_API_KEY = api_keys[api_key_index]
-    genai_client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
+    API_KEY = api_keys[api_key_index]
+    genai_client = genai.Client(api_key=API_KEY)
     save_key_index(api_key_index)
-    print(f"[API] Đã chuyển sang key #{api_key_index}")
+    print(f"[API] ÄÃ£ chuyá»ƒn sang key #{api_key_index}")
 
-async def call_gemini(model, contents, config=None, max_retries=1):
+async def call_gemini(model, contents, config=None, max_retries=None):
     global api_exhausted_until
-
     now = time.time()
     if now < api_exhausted_until:
-        raise Exception(
-            f"API đang trong thời gian chờ, thử lại sau "
-            f"{int(api_exhausted_until - now)}s"
-        )
-
+        raise Exception(f"API Ä‘ang trong thá»i gian chá», thá»­ láº¡i sau {int(api_exhausted_until - now)}s")
+    if max_retries is None:
+        max_retries = len(api_keys)
+    last_err = None
     for attempt in range(max_retries):
         try:
-            response = await genai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": contents
-                    }
-                ]
+            return await genai_client.aio.models.generate_content(
+                model=model, contents=contents, config=config
             )
-
-            return type(
-                "Response",
-                (),
-                {
-                    "text": response.choices[0].message.content or ""
-                }
-            )()
-
         except Exception as e:
-            print(f"[API] Lỗi: {e}")
-
-            if attempt + 1 >= max_retries:
-                raise
-
-            await asyncio.sleep(1)
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                print(f"[API] Key #{api_key_index} háº¿t quota, Ä‘ang chuyá»ƒn...")
+                switch_api_key()
+                last_err = e
+                continue
+            raise
+    api_exhausted_until = now + 60
+    raise last_err or Exception("Táº¥t cáº£ API keys Ä‘á»u háº¿t quota")
 
 def load_joined_channels():
     try:
@@ -270,7 +259,7 @@ def start_keepalive():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 start_keepalive()
 
-genai_client = genai.Client(api_key=GEMINI_API_KEY)
+genai_client = genai.Client(api_key=API_KEY)
 
 snipe_store = {}
 console_channel_id = None
@@ -280,13 +269,13 @@ api_exhausted_until = 0
 
 @bot.event
 async def on_ready():
-    print(f"--- Bot đã online thành công với tên: {bot.user} ---")
-    print(f"Đang theo dõi {len(joined_channels)} kênh tự động: {joined_channels}")
+    print(f"--- Bot Ä‘Ã£ online thÃ nh cÃ´ng vá»›i tÃªn: {bot.user} ---")
+    print(f"Äang theo dÃµi {len(joined_channels)} kÃªnh tá»± Ä‘á»™ng: {joined_channels}")
     global console_channel_id
     if console_channel_id:
         ch = bot.get_channel(console_channel_id)
         if ch:
-            print(f"Console chat đang gửi đến: #{ch.name} ({console_channel_id})")
+            print(f"Console chat Ä‘ang gá»­i Ä‘áº¿n: #{ch.name} ({console_channel_id})")
     auto_chat_loop.start()
 
 
@@ -304,11 +293,11 @@ async def on_message_delete(message):
 @bot.command(name="join")
 async def join(ctx):
     if ctx.channel.id in joined_channels:
-        await ctx.reply("Mình đã ở trong kênh này rồi mà! 👀")
+        await ctx.reply("MÃ¬nh Ä‘Ã£ á»Ÿ trong kÃªnh nÃ y rá»“i mÃ ! ðŸ‘€")
     else:
         joined_channels.append(ctx.channel.id)
         save_joined_channels(joined_channels)
-        await ctx.reply("✅ Đã tham gia kênh này! Mình sẽ tự động trả lời mọi câu hỏi ở đây.")
+        await ctx.reply("âœ… ÄÃ£ tham gia kÃªnh nÃ y! MÃ¬nh sáº½ tá»± Ä‘á»™ng tráº£ lá»i má»i cÃ¢u há»i á»Ÿ Ä‘Ã¢y.")
 
 @bot.command(name="learn")
 async def learn(ctx, *, content):
@@ -316,15 +305,15 @@ async def learn(ctx, *, content):
     append_file(LEARNED_KNOWLEDGE_FILE, content)
     KNOWLEDGE_LEARNED = load_file(LEARNED_KNOWLEDGE_FILE)
     KNOWLEDGE_BASE = load_file(KNOWLEDGE_FILE)
-    await ctx.reply("✅ Mình đã ghi nhớ thông tin này!")
+    await ctx.reply("âœ… MÃ¬nh Ä‘Ã£ ghi nhá»› thÃ´ng tin nÃ y!")
 
 @bot.command(name="study")
 async def study(ctx, limit: int = 1000):
     global KNOWLEDGE_LEARNED
     if limit > 100000:
-        await ctx.reply("⚠️ Giới hạn tối đa 100000 tin nhắn.")
+        await ctx.reply("âš ï¸ Giá»›i háº¡n tá»‘i Ä‘a 100000 tin nháº¯n.")
         limit = 100000
-    msg = await ctx.reply(f"📖 Đang học {limit} tin nhắn gần nhất...")
+    msg = await ctx.reply(f"ðŸ“– Äang há»c {limit} tin nháº¯n gáº§n nháº¥t...")
 
     async with ctx.channel.typing():
         lines = []
@@ -338,50 +327,46 @@ async def study(ctx, limit: int = 1000):
                 lines.append(f"{msg_h.author.display_name}: {text}")
 
         if not lines:
-            await msg.edit(content="Không có tin nhắn nào để học.")
+            await msg.edit(content="KhÃ´ng cÃ³ tin nháº¯n nÃ o Ä‘á»ƒ há»c.")
             return
 
         learned = "\n".join(reversed(lines))
         append_file(LEARNED_KNOWLEDGE_FILE, learned)
         KNOWLEDGE_LEARNED = load_file(LEARNED_KNOWLEDGE_FILE)
-        await msg.edit(content=f"✅ Đã học xong {len(lines)} tin nhắn!")
+        await msg.edit(content=f"âœ… ÄÃ£ há»c xong {len(lines)} tin nháº¯n!")
 
 @bot.command(name="api")
 async def api(ctx, *, api_key):
-    global API_KEY, genai_client
-
-    API_KEY = api_key.strip()
-
-    genai_client = AsyncOpenAI(
-        api_key=API_KEY,
-        base_url=BASE_URL
-    )
-
-    update_env_var("API_KEY", API_KEY)
-
-    await ctx.reply("✅ Đã cập nhật API key thành công!")
+    global API_KEY, genai_client, api_keys, api_key_index
+    API_KEY = api_key
+    api_keys = [api_key]
+    api_key_index = 0
+    genai_client = genai.Client(api_key=API_KEY)
+    save_key_index(0)
+    update_env_var("API_KEY", api_key)
+    await ctx.reply("âœ… ÄÃ£ cáº­p nháº­t API key thÃ nh cÃ´ng!")
 
 @bot.command(name="model")
 async def model(ctx, *, model):
     global MODEL
     MODEL = model
     update_env_var("MODEL", model)
-    await ctx.reply(f"✅ Đã chuyển sang model: {model}")
+    await ctx.reply(f"âœ… ÄÃ£ chuyá»ƒn sang model: {model}")
 
 @bot.command(name="reset")
 async def reset(ctx):
     cid = ctx.channel.id
     conversation_memory.pop(cid, None)
-    await ctx.reply("🧹 Đã xóa bộ nhớ hội thoại cho kênh này!")
+    await ctx.reply("ðŸ§¹ ÄÃ£ xÃ³a bá»™ nhá»› há»™i thoáº¡i cho kÃªnh nÃ y!")
 
 @bot.command(name="keys")
 async def keys(ctx):
     total = len(api_keys)
     mask = lambda k: k[:8] + "..." + k[-4:]
     current = mask(api_keys[api_key_index]) if api_keys else "N/A"
-    lines = [f"🔑 **API Keys**: {total} keys\n**Đang dùng**: #{api_key_index} - `{current}`"]
+    lines = [f"ðŸ”‘ **API Keys**: {total} keys\n**Äang dÃ¹ng**: #{api_key_index} - `{current}`"]
     for i, k in enumerate(api_keys):
-        mark = " ✅" if i == api_key_index else ""
+        mark = " âœ…" if i == api_key_index else ""
         lines.append(f"`#{i}` {mask(k)}{mark}")
     await ctx.reply("\n".join(lines))
 
@@ -390,32 +375,32 @@ async def addkey(ctx, *, api_key):
     global api_keys
     api_key = api_key.strip()
     if not api_key:
-        await ctx.reply("❌ Thiếu API key!")
+        await ctx.reply("âŒ Thiáº¿u API key!")
         return
     if api_key in api_keys:
-        await ctx.reply("⚠️ Key này đã có trong danh sách!")
+        await ctx.reply("âš ï¸ Key nÃ y Ä‘Ã£ cÃ³ trong danh sÃ¡ch!")
         return
     api_keys.append(api_key)
     try:
         with open(API_KEYS_FILE, "a", encoding="utf-8") as f:
             f.write(api_key + "\n")
     except Exception as e:
-        await ctx.reply(f"✅ Đã thêm key nhưng lỗi ghi file: {e}")
+        await ctx.reply(f"âœ… ÄÃ£ thÃªm key nhÆ°ng lá»—i ghi file: {e}")
         return
-    await ctx.reply(f"✅ Đã thêm API key #{len(api_keys) - 1}!")
+    await ctx.reply(f"âœ… ÄÃ£ thÃªm API key #{len(api_keys) - 1}!")
 
 @bot.command(name="addkeyat")
 async def addkeyat(ctx, index: int, *, api_key):
     global api_keys, api_key_index
     api_key = api_key.strip()
     if not api_key:
-        await ctx.reply("❌ Thiếu API key!")
+        await ctx.reply("âŒ Thiáº¿u API key!")
         return
     if index < 0 or index > len(api_keys):
-        await ctx.reply(f"❌ Vị trí phải từ 0 đến {len(api_keys)}!")
+        await ctx.reply(f"âŒ Vá»‹ trÃ­ pháº£i tá»« 0 Ä‘áº¿n {len(api_keys)}!")
         return
     if api_key in api_keys:
-        await ctx.reply("⚠️ Key này đã có trong danh sách!")
+        await ctx.reply("âš ï¸ Key nÃ y Ä‘Ã£ cÃ³ trong danh sÃ¡ch!")
         return
     api_keys.insert(index, api_key)
     if index <= api_key_index:
@@ -425,68 +410,68 @@ async def addkeyat(ctx, index: int, *, api_key):
         with open(API_KEYS_FILE, "w", encoding="utf-8") as f:
             f.write("\n".join(api_keys) + "\n")
     except Exception as e:
-        await ctx.reply(f"✅ Đã thêm key nhưng lỗi ghi file: {e}")
+        await ctx.reply(f"âœ… ÄÃ£ thÃªm key nhÆ°ng lá»—i ghi file: {e}")
         return
-    await ctx.reply(f"✅ Đã thêm API key vào vị trí #{index}!")
+    await ctx.reply(f"âœ… ÄÃ£ thÃªm API key vÃ o vá»‹ trÃ­ #{index}!")
 
 @bot.command(name="file")
 async def file(ctx, action=None, filename=None, *, content=None):
     if ctx.author.id not in ALLOWED_FILE_USERS:
-        await ctx.reply("❌ Bạn không có quyền sử dụng lệnh này.")
+        await ctx.reply("âŒ Báº¡n khÃ´ng cÃ³ quyá»n sá»­ dá»¥ng lá»‡nh nÃ y.")
         return
     if action is None:
-        embed = discord.Embed(title="📁 File Manager", color=0x00ff00)
+        embed = discord.Embed(title="ðŸ“ File Manager", color=0x00ff00)
         for f in ALLOWED_FILES:
             size, modified, preview = get_file_info(f)
             if size is not None:
-                val = f"**Size:** {size} bytes\n**Sửa lần cuối:** {modified}\n**Preview:** `{preview}`"
+                val = f"**Size:** {size} bytes\n**Sá»­a láº§n cuá»‘i:** {modified}\n**Preview:** `{preview}`"
             else:
-                val = "*File chưa tồn tại*"
+                val = "*File chÆ°a tá»“n táº¡i*"
             embed.add_field(name=f"`{f}`", value=val, inline=False)
-        embed.add_field(name="Cách dùng", value="`c!file view <file>` - Xem nội dung\n`c!file write <file> <nội dung>` - Ghi đè\n`c!file append <file> <nội dung>` - Thêm vào cuối", inline=False)
+        embed.add_field(name="CÃ¡ch dÃ¹ng", value="`c!file view <file>` - Xem ná»™i dung\n`c!file write <file> <ná»™i dung>` - Ghi Ä‘Ã¨\n`c!file append <file> <ná»™i dung>` - ThÃªm vÃ o cuá»‘i", inline=False)
         await ctx.reply(embed=embed)
         return
 
     if filename not in ALLOWED_FILES:
-        await ctx.reply(f"❌ File không được phép chỉnh sửa. Cho phép: {', '.join(ALLOWED_FILES)}")
+        await ctx.reply(f"âŒ File khÃ´ng Ä‘Æ°á»£c phÃ©p chá»‰nh sá»­a. Cho phÃ©p: {', '.join(ALLOWED_FILES)}")
         return
 
     if action == "view":
         content = load_file(filename)
         if not content:
-            await ctx.reply(f"📄 `{filename}`: *rỗng hoặc không tồn tại*")
+            await ctx.reply(f"ðŸ“„ `{filename}`: *rá»—ng hoáº·c khÃ´ng tá»“n táº¡i*")
         elif len(content) > 1900:
             for i in range(0, len(content), 1900):
-                await ctx.reply(f"📄 `{filename}`:\n```\n{content[i:i+1900]}\n```")
+                await ctx.reply(f"ðŸ“„ `{filename}`:\n```\n{content[i:i+1900]}\n```")
         else:
-            await ctx.reply(f"📄 `{filename}`:\n```\n{content}\n```")
+            await ctx.reply(f"ðŸ“„ `{filename}`:\n```\n{content}\n```")
 
     elif action == "write":
         if not content:
-            await ctx.reply("❌ Ghi thiếu nội dung. Dùng: `c!file write <file> <nội dung>`")
+            await ctx.reply("âŒ Ghi thiáº¿u ná»™i dung. DÃ¹ng: `c!file write <file> <ná»™i dung>`")
             return
         save_file(filename, content)
         refresh_globals(filename)
         size, modified, _ = get_file_info(filename)
-        embed = discord.Embed(title=f"✅ Đã ghi `{filename}`", color=0x00ff00)
+        embed = discord.Embed(title=f"âœ… ÄÃ£ ghi `{filename}`", color=0x00ff00)
         embed.add_field(name="Size", value=f"{size} bytes")
-        embed.add_field(name="Cập nhật", value=modified)
+        embed.add_field(name="Cáº­p nháº­t", value=modified)
         await ctx.reply(embed=embed)
 
     elif action == "append":
         if not content:
-            await ctx.reply("❌ Thiếu nội dung. Dùng: `c!file append <file> <nội dung>`")
+            await ctx.reply("âŒ Thiáº¿u ná»™i dung. DÃ¹ng: `c!file append <file> <ná»™i dung>`")
             return
         append_file(filename, content)
         refresh_globals(filename)
-        await ctx.reply(f"✅ Đã thêm vào `{filename}`")
+        await ctx.reply(f"âœ… ÄÃ£ thÃªm vÃ o `{filename}`")
 
     else:
-        await ctx.reply("❌ Action không hợp lệ. Dùng: `view`, `write`, `append`")
+        await ctx.reply("âŒ Action khÃ´ng há»£p lá»‡. DÃ¹ng: `view`, `write`, `append`")
 
 @bot.command(name="restart")
 async def restart(ctx):
-    await ctx.reply("🔄 Đang khởi động lại...")
+    await ctx.reply("ðŸ”„ Äang khá»Ÿi Ä‘á»™ng láº¡i...")
     await bot.close()
     subprocess.Popen([sys.executable] + sys.argv)
     os._exit(0)
@@ -904,7 +889,7 @@ def decompile(hex_str):
 def compile_asm(asm):
     lines = asm.strip().split("\n")
     
-    # ------------------ Vòng 1: Quét Label & Tính địa chỉ bộ nhớ ------------------
+    # ------------------ VÃ²ng 1: QuÃ©t Label & TÃ­nh Ä‘á»‹a chá»‰ bá»™ nhá»› ------------------
     org_addr = 0xd730
     current_addr = org_addr
     labels = {}
@@ -951,7 +936,7 @@ def compile_asm(asm):
                 elif HEX_PAIR.match(seg):
                     size += 1
                 else:
-                    raise ValueError(f"Không nhận diện được đối số gán: '{seg}'")
+                    raise ValueError(f"KhÃ´ng nháº­n diá»‡n Ä‘Æ°á»£c Ä‘á»‘i sá»‘ gÃ¡n: '{seg}'")
         else:
             tokens = line.replace(",", " ").split()
             i = 0
@@ -971,12 +956,12 @@ def compile_asm(asm):
                 elif HEX_PAIR.match(tok):
                     size += 1
                 else:
-                    raise ValueError(f"Lệnh hoặc token không hợp lệ: '{tok}'")
+                    raise ValueError(f"Lá»‡nh hoáº·c token khÃ´ng há»£p lá»‡: '{tok}'")
                 i += 1
 
         current_addr += size
 
-    # ------------------ Vòng 2: Sinh Assembly Hex theo bộ nhớ thực ------------------
+    # ------------------ VÃ²ng 2: Sinh Assembly Hex theo bá»™ nhá»› thá»±c ------------------
     out = []
     for line, addr in instructions:
         if line.startswith("hex "):
@@ -1040,7 +1025,7 @@ def compile_asm(asm):
                             lname = tokens[i+2]
                             i += 3
                         else:
-                            raise ValueError("Thiếu tên label sau `adr_of`")
+                            raise ValueError("Thiáº¿u tÃªn label sau `adr_of`")
                     else:
                         lname = tokens[i+1]
                         i += 2
@@ -1049,7 +1034,7 @@ def compile_asm(asm):
                     out.extend([f"{laddr & 0xFF:02x}", f"{(laddr >> 8) & 0xFF:02x}"])
                     continue
                 else:
-                    raise ValueError("`adr_of` bị thiếu đối số (cần truyền vào tên Label)")
+                    raise ValueError("`adr_of` bá»‹ thiáº¿u Ä‘á»‘i sá»‘ (cáº§n truyá»n vÃ o tÃªn Label)")
                     
             if tok in NAME_MAP:
                 addr_val = NAME_MAP[tok]
@@ -1093,13 +1078,13 @@ async def decomp(ctx):
     content = extract_codeblock(content)
     content = await get_input_text(ctx, content)
     if not content:
-        await ctx.reply("❌ Cần hex để decompile. VD: `c!decomp FD 24 30 30` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n hex Ä‘á»ƒ decompile. VD: `c!decomp FD 24 30 30` hoáº·c gá»­i file `.txt`")
         return
     try:
         result = decompile(content)
         await ctx.reply(f"```asm\n{result}\n```" if len(result) <= 1900 else f"```asm\n{result[:1900]}\n```")
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi khi giải mã: {e}")
+        await ctx.reply(f"âŒ Lá»—i khi giáº£i mÃ£: {e}")
 
 @bot.command(name="comp")
 async def comp(ctx):
@@ -1107,14 +1092,14 @@ async def comp(ctx):
     content = extract_codeblock(content)
     content = await get_input_text(ctx, content)
     if not content:
-        await ctx.reply("❌ Cần assembly để compile. VD: `c!comp setlr` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n assembly Ä‘á»ƒ compile. VD: `c!comp setlr` hoáº·c gá»­i file `.txt`")
         return
     content = strip_asm_comments(content)
     try:
         result = compile_asm(content)
         await ctx.reply(f"```\n{result}\n```" if len(result) <= 1900 else f"```\n{result[:1900]}\n```")
     except Exception as e:
-        await ctx.reply(f"❌ Có lỗi cú pháp trong mã của bạn:\n> `{e}`")
+        await ctx.reply(f"âŒ CÃ³ lá»—i cÃº phÃ¡p trong mÃ£ cá»§a báº¡n:\n> `{e}`")
 
 @bot.command(name="comp5")
 async def comp5(ctx):
@@ -1122,7 +1107,7 @@ async def comp5(ctx):
     content = extract_codeblock(content)
     content = await get_input_text(ctx, content)
     if not content:
-        await ctx.reply("❌ Cần assembly để compile 580. VD: `c!comp5 setlr` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n assembly Ä‘á»ƒ compile 580. VD: `c!comp5 setlr` hoáº·c gá»­i file `.txt`")
         return
     content = strip_asm_comments(content)
     asm = content.strip()
@@ -1139,7 +1124,7 @@ async def comp5(ctx):
         hex_out = " ".join(lines[-1].split())
         await ctx.reply(f"```\n{hex_out}\n```")
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi compile 580:\n> `{e}`")
+        await ctx.reply(f"âŒ Lá»—i compile 580:\n> `{e}`")
 
 @bot.command(name="comp8")
 async def comp8(ctx):
@@ -1147,7 +1132,7 @@ async def comp8(ctx):
     content = extract_codeblock(content)
     content = await get_input_text(ctx, content)
     if not content:
-        await ctx.reply("❌ Cần assembly để compile 880. VD: `c!comp8 setlr` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n assembly Ä‘á»ƒ compile 880. VD: `c!comp8 setlr` hoáº·c gá»­i file `.txt`")
         return
     content = strip_asm_comments(content)
     asm = content.strip()
@@ -1164,37 +1149,37 @@ async def comp8(ctx):
         hex_out = " ".join(lines[-1].split())
         await ctx.reply(f"```\n{hex_out}\n```")
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi compile 880:\n> `{e}`")
+        await ctx.reply(f"âŒ Lá»—i compile 880:\n> `{e}`")
 
 @bot.command(name="help")
 async def help_cmd(ctx):
     embed = discord.Embed(
-        title="⚙️ Casio Dao Truong - Danh sách lệnh",
-        description="Tag bot (@Stacked) hoặc reply tin nhắn bot để hỏi về CASIO 580/880.\nDùng `c!help <lệnh>` để xem chi tiết từng lệnh.",
+        title="âš™ï¸ Casio Dao Truong - Danh sÃ¡ch lá»‡nh",
+        description="Tag bot (@Stacked) hoáº·c reply tin nháº¯n bot Ä‘á»ƒ há»i vá» CASIO 580/880.\nDÃ¹ng `c!help <lá»‡nh>` Ä‘á»ƒ xem chi tiáº¿t tá»«ng lá»‡nh.",
         color=0x00ff00
     )
-    embed.add_field(name="🤖 Cơ bản", value="`c!join` - Vô kênh, auto rep\n`c!leave` - Rời kênh, chỉ rep khi tag/reply\n`c!dongmon` - Xem số member/bot\n`c!hoidap` - Hỏi đáp chủ đề CASIO\n`c!snipe` - Snipe tin nhắn đã xoá", inline=False)
-    embed.add_field(name="🧠 Học tập", value="`c!learn <nd>` - Dạy bot ghi nhớ\n`c!study [sl]` - Quét tin nhắn học kiến thức", inline=False)
-    embed.add_field(name="⚡ CASIO Engine", value="`c!decomp <hex>` - Decompile hex → asm\n`c!comp <asm>` - Compile asm → hex (gadget)\n`c!comp5 <asm>` - Compile asm → hex (580)\n`c!comp8 <asm>` - Compile asm → hex (880)\n`c!transhex <hex>` - Dịch hex ra asm", inline=False)
-    embed.add_field(name="🖼️ P2B & Hex Tools", value="`c!p2b` / `c!p` - P2B Pro: Ảnh ⇄ Bitmap Hex\n`c!dichhex <hex>` - Dịch hex → ảnh bitmap\n`c!ganhex <hex>` - Format hex đẹp, chuẩn Casio\n`c!h2i [WxH] <hex>` - Hex → Image (tuỳ size)\n`c!hexsplit <hex>` - Split hex thành dòng", inline=False)
-    embed.add_field(name="🔧 API Keys", value="`c!api <key>` - Set API key hiện tại\n`c!addkey <key>` - Thêm API key mới\n`c!addkeyat <index> <key>` - Ghi đè key tại vị trí\n`c!keys` - Xem danh sách API key\n`c!model <model>` - Đổi model AI", inline=False)
-    embed.add_field(name="⚙️ Hệ thống", value="`c!reset` - Reset toàn bộ bot\n`c!restart` - Khởi động lại bot\n`c!file` - Quản lý file (list/view/delete)\n`c!console <#kênh>` - Bật console debug\n`c!help` - Xem danh sách lệnh", inline=False)
-    embed.set_footer(text="Casio Đạo Trưởng · @Stacked · 24 lệnh | v2.0")
+    embed.add_field(name="ðŸ¤– CÆ¡ báº£n", value="`c!join` - VÃ´ kÃªnh, auto rep\n`c!leave` - Rá»i kÃªnh, chá»‰ rep khi tag/reply\n`c!dongmon` - Xem sá»‘ member/bot\n`c!hoidap` - Há»i Ä‘Ã¡p chá»§ Ä‘á» CASIO\n`c!snipe` - Snipe tin nháº¯n Ä‘Ã£ xoÃ¡", inline=False)
+    embed.add_field(name="ðŸ§  Há»c táº­p", value="`c!learn <nd>` - Dáº¡y bot ghi nhá»›\n`c!study [sl]` - QuÃ©t tin nháº¯n há»c kiáº¿n thá»©c", inline=False)
+    embed.add_field(name="âš¡ CASIO Engine", value="`c!decomp <hex>` - Decompile hex â†’ asm\n`c!comp <asm>` - Compile asm â†’ hex (gadget)\n`c!comp5 <asm>` - Compile asm â†’ hex (580)\n`c!comp8 <asm>` - Compile asm â†’ hex (880)\n`c!transhex <hex>` - Dá»‹ch hex ra asm", inline=False)
+    embed.add_field(name="ðŸ–¼ï¸ P2B & Hex Tools", value="`c!p2b` / `c!p` - P2B Pro: áº¢nh â‡„ Bitmap Hex\n`c!dichhex <hex>` - Dá»‹ch hex â†’ áº£nh bitmap\n`c!ganhex <hex>` - Format hex Ä‘áº¹p, chuáº©n Casio\n`c!h2i [WxH] <hex>` - Hex â†’ Image (tuá»³ size)\n`c!hexsplit <hex>` - Split hex thÃ nh dÃ²ng", inline=False)
+    embed.add_field(name="ðŸ”§ API Keys", value="`c!api <key>` - Set API key hiá»‡n táº¡i\n`c!addkey <key>` - ThÃªm API key má»›i\n`c!addkeyat <index> <key>` - Ghi Ä‘Ã¨ key táº¡i vá»‹ trÃ­\n`c!keys` - Xem danh sÃ¡ch API key\n`c!model <model>` - Äá»•i model AI", inline=False)
+    embed.add_field(name="âš™ï¸ Há»‡ thá»‘ng", value="`c!reset` - Reset toÃ n bá»™ bot\n`c!restart` - Khá»Ÿi Ä‘á»™ng láº¡i bot\n`c!file` - Quáº£n lÃ½ file (list/view/delete)\n`c!console <#kÃªnh>` - Báº­t console debug\n`c!help` - Xem danh sÃ¡ch lá»‡nh", inline=False)
+    embed.set_footer(text="Casio Äáº¡o TrÆ°á»Ÿng Â· @Stacked Â· 24 lá»‡nh | v2.0")
     await ctx.reply(embed=embed)
 
 @bot.command(name="leave")
 async def leave(ctx):
     if ctx.channel.id not in joined_channels:
-        await ctx.reply("Mình đâu có ở trong kênh này đâu? 🤔")
+        await ctx.reply("MÃ¬nh Ä‘Ã¢u cÃ³ á»Ÿ trong kÃªnh nÃ y Ä‘Ã¢u? ðŸ¤”")
     else:
         joined_channels.remove(ctx.channel.id)
         save_joined_channels(joined_channels)
-        await ctx.reply("👋 Đã rời kênh! Giờ chỉ trả lời khi được tag hoặc reply thôi.")
+        await ctx.reply("ðŸ‘‹ ÄÃ£ rá»i kÃªnh! Giá» chá»‰ tráº£ lá»i khi Ä‘Æ°á»£c tag hoáº·c reply thÃ´i.")
 
 @bot.command(name="dongmon")
 async def dongmon(ctx):
     if not ctx.guild:
-        await ctx.reply("❌ Lệnh này chỉ dùng trong server!")
+        await ctx.reply("âŒ Lá»‡nh nÃ y chá»‰ dÃ¹ng trong server!")
         return
     members = []
     async for m in ctx.guild.fetch_members():
@@ -1202,34 +1187,34 @@ async def dongmon(ctx):
     total = len(members)
     bots = sum(1 for m in members if m.bot)
     humans = total - bots
-    await ctx.reply(f"# Trong đây có {total} thằng đệ tử <:Daide_Putin:1483786083077455913>\n**{humans} Phàm nhân**\n**{bots} Bot đại đạo**")
+    await ctx.reply(f"# Trong Ä‘Ã¢y cÃ³ {total} tháº±ng Ä‘á»‡ tá»­ <:Daide_Putin:1483786083077455913>\n**{humans} PhÃ m nhÃ¢n**\n**{bots} Bot Ä‘áº¡i Ä‘áº¡o**")
 
 HOIDAP_DATA = {
-    "spell": "**Spell**\nĐánh vần chữ. Có thể spell 1-5 line font thường và 6-8 line font nhỏ.",
-    "an": "**An**\nThứ không có khái niệm cụ thể nhưng lúc nào cũng dùng tới. Một số an: 100an, 124an, 136an,...",
-    "small font": "**Small font**\nHàm `smallprint` (23DCC) in chữ font nhỏ 8x8.\n- r0: font size (08, 0a, 0e)\n- r1: linepos\n- er2: địa chỉ chuỗi",
-    "quickcpy": "**Quick Copy**\nChương trình dùng để inject data, có nhiều phiên bản: qcm, qc++,... Phiên bản nâng cấp: hexdmax :/",
-    "hex editor": "**Hex Editor / Hexd**\nChương trình dùng để inject data, có thể tuỳ chỉnh addr và hex tuỳ thích.",
-    "inject": "**Inject**\nChương trình dùng để inject data. Có nhiều phiên bản: qcm, qc++,... Phiên bản nâng cấp: hexdmax :/",
-    "addr": "**Địa chỉ (Address)**\n- 0xD730: runtime\n- 0xE9E0: backup\n- 0xD111: mode\n- 0xD137: font_size\n- 0xDDD4: screen buffer 1\n- 0xE3D4: screen buffer 2\n- 0xF033: độ sáng\n- 0xF039: scroll",
-    "launcher": "**Launcher**\nDùng để chạy chương trình ROP từ màn hình tính toán:\n```\nFD24 30 30 DA 7B 31 30 FE 03 E0 E9 30 D7 2E D7 32 89 31 30 30 30 74 1F 32 48\n```\nẤn [=] để chạy.",
-    "token": "**Token**\nToken trong CASIO là mã hex đại diện cho phép tính.\nVí dụ: `33 36 a6 36 37 00` là token của \"36+67\".",
-    "hex": "**Hệ thập lục phân (Hex)**\nCơ số 16, dùng 0-9 và A-F.\n- `hex 00 01` = `0x0100` (little-endian)\n- `0x` đảo ngược với `hex`",
-    "dec": "**Hệ thập phân (Dec)**\nCơ số 10, dùng 0-9.",
-    "bin": "**Hệ nhị phân (Bin)**\nCơ số 2, chỉ dùng 0 và 1.",
-    "rop": "**ROP (Return-Oriented Programming)**\nKỹ thuật nối các gadget (đoạn mã kết thúc bằng RT/POP PC) trên stack.\n- Gọi gadget qua `call <địa chỉ>`\n- Dữ liệu đặt ngay sau gadget trên stack",
-    "asm": "**Assembly ASM**\nCác lệnh: MOV, ADD, SUB, L, ST, PUSH, POP, B, BL, RT.\nThanh ghi: R0-R15 (1B), ER0-ER14 (2B), XR0-XR12 (4B), QR0-QR8 (8B).",
+    "spell": "**Spell**\nÄÃ¡nh váº§n chá»¯. CÃ³ thá»ƒ spell 1-5 line font thÆ°á»ng vÃ  6-8 line font nhá».",
+    "an": "**An**\nThá»© khÃ´ng cÃ³ khÃ¡i niá»‡m cá»¥ thá»ƒ nhÆ°ng lÃºc nÃ o cÅ©ng dÃ¹ng tá»›i. Má»™t sá»‘ an: 100an, 124an, 136an,...",
+    "small font": "**Small font**\nHÃ m `smallprint` (23DCC) in chá»¯ font nhá» 8x8.\n- r0: font size (08, 0a, 0e)\n- r1: linepos\n- er2: Ä‘á»‹a chá»‰ chuá»—i",
+    "quickcpy": "**Quick Copy**\nChÆ°Æ¡ng trÃ¬nh dÃ¹ng Ä‘á»ƒ inject data, cÃ³ nhiá»u phiÃªn báº£n: qcm, qc++,... PhiÃªn báº£n nÃ¢ng cáº¥p: hexdmax :/",
+    "hex editor": "**Hex Editor / Hexd**\nChÆ°Æ¡ng trÃ¬nh dÃ¹ng Ä‘á»ƒ inject data, cÃ³ thá»ƒ tuá»³ chá»‰nh addr vÃ  hex tuá»³ thÃ­ch.",
+    "inject": "**Inject**\nChÆ°Æ¡ng trÃ¬nh dÃ¹ng Ä‘á»ƒ inject data. CÃ³ nhiá»u phiÃªn báº£n: qcm, qc++,... PhiÃªn báº£n nÃ¢ng cáº¥p: hexdmax :/",
+    "addr": "**Äá»‹a chá»‰ (Address)**\n- 0xD730: runtime\n- 0xE9E0: backup\n- 0xD111: mode\n- 0xD137: font_size\n- 0xDDD4: screen buffer 1\n- 0xE3D4: screen buffer 2\n- 0xF033: Ä‘á»™ sÃ¡ng\n- 0xF039: scroll",
+    "launcher": "**Launcher**\nDÃ¹ng Ä‘á»ƒ cháº¡y chÆ°Æ¡ng trÃ¬nh ROP tá»« mÃ n hÃ¬nh tÃ­nh toÃ¡n:\n```\nFD24 30 30 DA 7B 31 30 FE 03 E0 E9 30 D7 2E D7 32 89 31 30 30 30 74 1F 32 48\n```\náº¤n [=] Ä‘á»ƒ cháº¡y.",
+    "token": "**Token**\nToken trong CASIO lÃ  mÃ£ hex Ä‘áº¡i diá»‡n cho phÃ©p tÃ­nh.\nVÃ­ dá»¥: `33 36 a6 36 37 00` lÃ  token cá»§a \"36+67\".",
+    "hex": "**Há»‡ tháº­p lá»¥c phÃ¢n (Hex)**\nCÆ¡ sá»‘ 16, dÃ¹ng 0-9 vÃ  A-F.\n- `hex 00 01` = `0x0100` (little-endian)\n- `0x` Ä‘áº£o ngÆ°á»£c vá»›i `hex`",
+    "dec": "**Há»‡ tháº­p phÃ¢n (Dec)**\nCÆ¡ sá»‘ 10, dÃ¹ng 0-9.",
+    "bin": "**Há»‡ nhá»‹ phÃ¢n (Bin)**\nCÆ¡ sá»‘ 2, chá»‰ dÃ¹ng 0 vÃ  1.",
+    "rop": "**ROP (Return-Oriented Programming)**\nKá»¹ thuáº­t ná»‘i cÃ¡c gadget (Ä‘oáº¡n mÃ£ káº¿t thÃºc báº±ng RT/POP PC) trÃªn stack.\n- Gá»i gadget qua `call <Ä‘á»‹a chá»‰>`\n- Dá»¯ liá»‡u Ä‘áº·t ngay sau gadget trÃªn stack",
+    "asm": "**Assembly ASM**\nCÃ¡c lá»‡nh: MOV, ADD, SUB, L, ST, PUSH, POP, B, BL, RT.\nThanh ghi: R0-R15 (1B), ER0-ER14 (2B), XR0-XR12 (4B), QR0-QR8 (8B).",
     "bangkitu": "__bangkitu__",
-    "store": "**Store / Ghi giá trị**\nDùng `xr0 = addr, value, pad` + `[er0]=r2` ghi 1 byte.\nDùng `xr0 = addr, v_high, v_low` + `[er0]=er2` ghi 2 byte.\nVùng backup: dùng `adr_of [+4784] label`."
+    "store": "**Store / Ghi giÃ¡ trá»‹**\nDÃ¹ng `xr0 = addr, value, pad` + `[er0]=r2` ghi 1 byte.\nDÃ¹ng `xr0 = addr, v_high, v_low` + `[er0]=er2` ghi 2 byte.\nVÃ¹ng backup: dÃ¹ng `adr_of [+4784] label`."
 }
 
 class HoiDapSelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label=k, description=v.split("\n")[0][:50] if v != "__bangkitu__" else "Bảng kí tự CASIO")
+            discord.SelectOption(label=k, description=v.split("\n")[0][:50] if v != "__bangkitu__" else "Báº£ng kÃ­ tá»± CASIO")
             for k, v in HOIDAP_DATA.items()
         ]
-        super().__init__(placeholder="Chọn chủ đề...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Chá»n chá»§ Ä‘á»...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         key = self.values[0]
@@ -1242,30 +1227,30 @@ class HoiDapSelect(discord.ui.Select):
                     if os.path.exists(fp):
                         files_to_send.append(discord.File(fp))
                 if not files_to_send:
-                    await interaction.response.send_message("❌ Không tìm thấy file ảnh (`1.webp`, `wth.webp`)", ephemeral=True)
+                    await interaction.response.send_message("âŒ KhÃ´ng tÃ¬m tháº¥y file áº£nh (`1.webp`, `wth.webp`)", ephemeral=True)
                     return
-                await interaction.response.send_message("**Bảng kí tự CASIO fx-580VN X:**", files=files_to_send, ephemeral=True)
+                await interaction.response.send_message("**Báº£ng kÃ­ tá»± CASIO fx-580VN X:**", files=files_to_send, ephemeral=True)
             except Exception as e:
-                await interaction.response.send_message(f"❌ Lỗi: {e}", ephemeral=True)
+                await interaction.response.send_message(f"âŒ Lá»—i: {e}", ephemeral=True)
         else:
-            await interaction.response.send_message(val + "\n\n📚 Xem thêm `knowledge.txt` hoặc `c!learn`", ephemeral=True)
+            await interaction.response.send_message(val + "\n\nðŸ“š Xem thÃªm `knowledge.txt` hoáº·c `c!learn`", ephemeral=True)
 
 @bot.command(name="hoidap")
 async def hoidap(ctx):
     view = discord.ui.View(timeout=120)
     view.add_item(HoiDapSelect())
-    await ctx.reply("📌 **Chọn chủ đề:**", view=view)
+    await ctx.reply("ðŸ“Œ **Chá»n chá»§ Ä‘á»:**", view=view)
 
 @bot.command(name="snipe")
 async def snipe(ctx):
     data = snipe_store.get(ctx.channel.id)
     if not data:
-        await ctx.reply("Không có tin nhắn nào bị xóa gần đây.")
+        await ctx.reply("KhÃ´ng cÃ³ tin nháº¯n nÃ o bá»‹ xÃ³a gáº§n Ä‘Ã¢y.")
         return
-    content = data["content"] or "(không có nội dung)"
+    content = data["content"] or "(khÃ´ng cÃ³ ná»™i dung)"
     att = "\n" + "\n".join(data["attachments"]) if data["attachments"] else ""
     time_str = discord.utils.format_dt(data["time"], style="R")
-    await ctx.reply(f"**{data['author'].name}** đã xóa: {time_str}\n{content}{att}")
+    await ctx.reply(f"**{data['author'].name}** Ä‘Ã£ xÃ³a: {time_str}\n{content}{att}")
 
 @bot.command(name="console")
 async def console(ctx, channel_id: str = None):
@@ -1273,21 +1258,21 @@ async def console(ctx, channel_id: str = None):
     if not channel_id:
         if console_channel_id:
             ch = bot.get_channel(console_channel_id)
-            await ctx.reply(f"Console chat đang gửi đến: #{ch.name}" if ch else f"ID: {console_channel_id}")
+            await ctx.reply(f"Console chat Ä‘ang gá»­i Ä‘áº¿n: #{ch.name}" if ch else f"ID: {console_channel_id}")
         else:
-            await ctx.reply("Chưa set channel cho console chat. Dùng `c!console <channel_id>`")
+            await ctx.reply("ChÆ°a set channel cho console chat. DÃ¹ng `c!console <channel_id>`")
         return
     try:
         cid = int(channel_id)
         ch = bot.get_channel(cid)
         if not ch:
-            await ctx.reply("❌ Không tìm thấy channel với ID đó.")
+            await ctx.reply("âŒ KhÃ´ng tÃ¬m tháº¥y channel vá»›i ID Ä‘Ã³.")
             return
         console_channel_id = cid
-        await ctx.reply(f"✅ Console chat sẽ gửi đến #{ch.name}")
-        print(f"Console chat đã set → #{ch.name} ({cid})")
+        await ctx.reply(f"âœ… Console chat sáº½ gá»­i Ä‘áº¿n #{ch.name}")
+        print(f"Console chat Ä‘Ã£ set â†’ #{ch.name} ({cid})")
     except ValueError:
-        await ctx.reply("❌ ID channel không hợp lệ.")
+        await ctx.reply("âŒ ID channel khÃ´ng há»£p lá»‡.")
 
 @bot.event
 async def on_message(message):
@@ -1316,7 +1301,7 @@ async def on_message(message):
     if not prompt:
         if is_joined_channel or is_reply_to_bot:
             return
-        await message.reply("Hửm? Bạn tag mình nhưng chưa hỏi gì kìa!")
+        await message.reply("Há»­m? Báº¡n tag mÃ¬nh nhÆ°ng chÆ°a há»i gÃ¬ kÃ¬a!")
         await bot.process_commands(message)
         return
 
@@ -1338,14 +1323,14 @@ async def on_message(message):
             await message.reply(embed=result)
         return
 
-    file_match = re.search(r'`([^`]+\.txt)`|(?:xem|đọc|nội dung|file)\s+`?(\S+\.txt)`?', prompt, re.IGNORECASE)
+    file_match = re.search(r'`([^`]+\.txt)`|(?:xem|Ä‘á»c|ná»™i dung|file)\s+`?(\S+\.txt)`?', prompt, re.IGNORECASE)
     if file_match:
         fname = file_match.group(1) or file_match.group(2)
         fpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), fname)
         if os.path.isfile(fpath):
             fcontent = load_file(fpath)
             if fcontent:
-                prompt += f"\n\nNội dung file {fname}:\n```\n{fcontent[:4000]}\n```"
+                prompt += f"\n\nNá»™i dung file {fname}:\n```\n{fcontent[:4000]}\n```"
 
     # Read attached .txt files for AI context
     if message.attachments:
@@ -1354,7 +1339,7 @@ async def on_message(message):
                 try:
                     data = await att.read()
                     txt_content = data.decode("utf-8", errors="replace")
-                    prompt += f"\n\nFile {att.filename} của bạn:\n```\n{txt_content[:4000]}\n```"
+                    prompt += f"\n\nFile {att.filename} cá»§a báº¡n:\n```\n{txt_content[:4000]}\n```"
                 except Exception:
                     pass
                 break
@@ -1407,15 +1392,15 @@ async def on_message(message):
 
         except Exception as e:
             err_str = str(e)
-            print(f"Lỗi hệ thống khi gọi AI: {e}")
+            print(f"Lá»—i há»‡ thá»‘ng khi gá»i AI: {e}")
             if "does not support image" in err_str.lower() or "image input" in err_str.lower():
-                await message.reply("⚠️ Model này không hỗ trợ ảnh. Vui lòng chỉ gửi tin nhắn chữ!")
+                await message.reply("âš ï¸ Model nÃ y khÃ´ng há»— trá»£ áº£nh. Vui lÃ²ng chá»‰ gá»­i tin nháº¯n chá»¯!")
             else:
-                await message.reply("⚠️ Hết API key rồi, thử lại sau nhé!")
+                await message.reply("âš ï¸ Háº¿t API key rá»“i, thá»­ láº¡i sau nhÃ©!")
 
     await bot.process_commands(message)
 
-# ================= P2B: Ảnh → Bitmap System =================
+# ================= P2B: áº¢nh â†’ Bitmap System =================
 p2b_sessions = {}
 
 def pil_to_bitmap(img, threshold=128, invert=False):
@@ -1598,28 +1583,28 @@ def build_p2b_embed(s, bits):
     adj_list = s["adjustments"]
     adj_str = ", ".join(f"{a['type']}={a.get('val','')}" for a in adj_list) if adj_list else "*none*"
     dt = s.get("dither", 0)
-    embed = discord.Embed(title="🖼️ P2B Bitmap", color=0x5865f2)
-    embed.add_field(name="📐 Canvas", value=f"{s['canvas_w']}×{s['canvas_h']}", inline=True)
-    embed.add_field(name="📷 Ảnh gốc", value=f"{s['original'].size[0]}×{s['original'].size[1]}", inline=True)
-    embed.add_field(name="📍 Vị trí", value=f"({s['pos_x']}, {s['pos_y']})", inline=True)
-    embed.add_field(name="⚙️ Threshold", value=str(s['threshold']), inline=True)
-    embed.add_field(name="🔄 Invert", value="✅" if s['invert'] else "❌", inline=True)
-    embed.add_field(name="🎲 Dither", value=str(dt) if dt > 0 else "❌", inline=True)
-    embed.add_field(name="🔲 Pixels bật", value=f"{on_px}/{total} ({on_px*100//total}%)", inline=False)
-    embed.add_field(name="🎨 Adjustments", value=adj_str, inline=False)
-    embed.set_footer(text=f"UID: {id(s)} | Gõ help để xem lệnh, exit để thoát")
+    embed = discord.Embed(title="ðŸ–¼ï¸ P2B Bitmap", color=0x5865f2)
+    embed.add_field(name="ðŸ“ Canvas", value=f"{s['canvas_w']}Ã—{s['canvas_h']}", inline=True)
+    embed.add_field(name="ðŸ“· áº¢nh gá»‘c", value=f"{s['original'].size[0]}Ã—{s['original'].size[1]}", inline=True)
+    embed.add_field(name="ðŸ“ Vá»‹ trÃ­", value=f"({s['pos_x']}, {s['pos_y']})", inline=True)
+    embed.add_field(name="âš™ï¸ Threshold", value=str(s['threshold']), inline=True)
+    embed.add_field(name="ðŸ”„ Invert", value="âœ…" if s['invert'] else "âŒ", inline=True)
+    embed.add_field(name="ðŸŽ² Dither", value=str(dt) if dt > 0 else "âŒ", inline=True)
+    embed.add_field(name="ðŸ”² Pixels báº­t", value=f"{on_px}/{total} ({on_px*100//total}%)", inline=False)
+    embed.add_field(name="ðŸŽ¨ Adjustments", value=adj_str, inline=False)
+    embed.set_footer(text=f"UID: {id(s)} | GÃµ help Ä‘á»ƒ xem lá»‡nh, exit Ä‘á»ƒ thoÃ¡t")
     return embed
 
 def build_p2b_xong_embed(bits, w, h):
     hex_out = bitmap_to_hex_bytes(bits)
     total = w * h
     on_px = int(bits.sum())
-    embed = discord.Embed(title="✅ P2B Done!", color=0x57f287)
-    embed.add_field(name="📐 Canvas", value=f"{w}×{h}", inline=True)
-    embed.add_field(name="🔲 Pixels bật", value=f"{on_px}/{total} ({on_px*100//total}%)", inline=True)
-    embed.add_field(name="📝 Hex", value=f"```\n{hex_out[:1024]}\n```" if len(hex_out) > 1024 else f"```\n{hex_out}\n```", inline=False)
+    embed = discord.Embed(title="âœ… P2B Done!", color=0x57f287)
+    embed.add_field(name="ðŸ“ Canvas", value=f"{w}Ã—{h}", inline=True)
+    embed.add_field(name="ðŸ”² Pixels báº­t", value=f"{on_px}/{total} ({on_px*100//total}%)", inline=True)
+    embed.add_field(name="ðŸ“ Hex", value=f"```\n{hex_out[:1024]}\n```" if len(hex_out) > 1024 else f"```\n{hex_out}\n```", inline=False)
     if len(hex_out) > 1024:
-        embed.add_field(name="📎 Tiếp theo", value=f"Còn {len(hex_out)-1024} ký tự hex nữa", inline=False)
+        embed.add_field(name="ðŸ“Ž Tiáº¿p theo", value=f"CÃ²n {len(hex_out)-1024} kÃ½ tá»± hex ná»¯a", inline=False)
     return embed
 
 def process_p2b(s):
@@ -1648,12 +1633,12 @@ def process_p2b(s):
     return bits
 
 def build_p2b_help():
-    embed = discord.Embed(title="📖 P2B Pro - Image ⇄ Bitmap Hex", color=0x5865f2)
-    embed.add_field(name="🌐 Web Tool (khuyên dùng)", value="Mở file `picture to bitmap/index.html` trong browser:\n• Ảnh → Hex: kéo thả ảnh, chỉnh threshold/invert/filters, xuất hex\n• Hex → Ảnh: dán hex space-separated, xem preview bitmap\n• Auto-detect: Ctrl+V tự nhận diện ảnh hay hex\n• Tích hợp slider, zoom, xuất file .h", inline=False)
-    embed.add_field(name="📍 Vị trí", value="`move <x> <y>` · `center` · `topleft` · `topright` · `bottomleft` · `bottomright`\n`size <WxH>`", inline=False)
-    embed.add_field(name="🎨 Adjustments", value="`brightness <-150~150>` · `contrast <-150~150>`\n`exposure <-5.0~5.0>`\n`levels <black> <white> [gamma]`\n`clarity <-100~100>` · `nr <0-100>` · `grain <0-100>`", inline=False)
-    embed.add_field(name="🔧 Filters", value="`smartsharpen <amt> [radius]` · `fieldblur <1-50>`\n`motionblur <1-50> [angle]` · `highpass <1-100>`\n`emboss` · `posterize <2-20>` · `equalize`\n`clahe <1.0-10.0>` · `removebg`", inline=False)
-    embed.add_field(name="⚙️ Khác", value="`threshold <0-255>` · `invert` · `dither <2/4/8>`\n`reset` · `xong` · `exit`\n\n💡 **Hex → Ảnh trên chat:** gửi hex kèm `c!p2b` để auto decode", inline=False)
+    embed = discord.Embed(title="ðŸ“– P2B Pro - Image â‡„ Bitmap Hex", color=0x5865f2)
+    embed.add_field(name="ðŸŒ Web Tool (khuyÃªn dÃ¹ng)", value="Má»Ÿ file `picture to bitmap/index.html` trong browser:\nâ€¢ áº¢nh â†’ Hex: kÃ©o tháº£ áº£nh, chá»‰nh threshold/invert/filters, xuáº¥t hex\nâ€¢ Hex â†’ áº¢nh: dÃ¡n hex space-separated, xem preview bitmap\nâ€¢ Auto-detect: Ctrl+V tá»± nháº­n diá»‡n áº£nh hay hex\nâ€¢ TÃ­ch há»£p slider, zoom, xuáº¥t file .h", inline=False)
+    embed.add_field(name="ðŸ“ Vá»‹ trÃ­", value="`move <x> <y>` Â· `center` Â· `topleft` Â· `topright` Â· `bottomleft` Â· `bottomright`\n`size <WxH>`", inline=False)
+    embed.add_field(name="ðŸŽ¨ Adjustments", value="`brightness <-150~150>` Â· `contrast <-150~150>`\n`exposure <-5.0~5.0>`\n`levels <black> <white> [gamma]`\n`clarity <-100~100>` Â· `nr <0-100>` Â· `grain <0-100>`", inline=False)
+    embed.add_field(name="ðŸ”§ Filters", value="`smartsharpen <amt> [radius]` Â· `fieldblur <1-50>`\n`motionblur <1-50> [angle]` Â· `highpass <1-100>`\n`emboss` Â· `posterize <2-20>` Â· `equalize`\n`clahe <1.0-10.0>` Â· `removebg`", inline=False)
+    embed.add_field(name="âš™ï¸ KhÃ¡c", value="`threshold <0-255>` Â· `invert` Â· `dither <2/4/8>`\n`reset` Â· `xong` Â· `exit`\n\nðŸ’¡ **Hex â†’ áº¢nh trÃªn chat:** gá»­i hex kÃ¨m `c!p2b` Ä‘á»ƒ auto decode", inline=False)
     return embed
 
 SIZE_RE = re.compile(r'^size\s+(\d+)x(\d+)$', re.IGNORECASE)
@@ -1664,17 +1649,17 @@ async def p2b(ctx):
     if not ctx.message.attachments:
         if uid in p2b_sessions:
             del p2b_sessions[uid]
-        await ctx.reply("📷 Gửi ảnh kèm theo `c!p2b` để convert bitmap.\n" + build_p2b_help())
+        await ctx.reply("ðŸ“· Gá»­i áº£nh kÃ¨m theo `c!p2b` Ä‘á»ƒ convert bitmap.\n" + build_p2b_help())
         return
     att = ctx.message.attachments[0]
     if not att.filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
-        await ctx.reply("❌ Chỉ hỗ trợ PNG/JPG/BMP/GIF.")
+        await ctx.reply("âŒ Chá»‰ há»— trá»£ PNG/JPG/BMP/GIF.")
         return
     img_data = await att.read()
     try:
         pil_img = Image.open(BytesIO(img_data)).convert("RGB")
     except Exception:
-        await ctx.reply("❌ Không đọc được ảnh.")
+        await ctx.reply("âŒ KhÃ´ng Ä‘á»c Ä‘Æ°á»£c áº£nh.")
         return
     s = {
         "original": pil_img.copy(),
@@ -1702,7 +1687,7 @@ class P2BTutorialButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=120)
 
-    @discord.ui.button(label="📖 Hướng dẫn P2B", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="ðŸ“– HÆ°á»›ng dáº«n P2B", style=discord.ButtonStyle.secondary)
     async def tutorial(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = build_p2b_help()
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1715,19 +1700,19 @@ async def p(ctx):
 
     if not text and not ctx.message.attachments:
         if not has_session:
-            await ctx.reply("📷 Gửi ảnh kèm `c!p` để convert bitmap.\nHoặc dùng `c!p <lệnh>` nếu đang trong session.", view=P2BTutorialButton())
+            await ctx.reply("ðŸ“· Gá»­i áº£nh kÃ¨m `c!p` Ä‘á»ƒ convert bitmap.\nHoáº·c dÃ¹ng `c!p <lá»‡nh>` náº¿u Ä‘ang trong session.", view=P2BTutorialButton())
         return
 
     if ctx.message.attachments:
         att = ctx.message.attachments[0]
         if not att.filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
-            await ctx.reply("❌ Chỉ hỗ trợ PNG/JPG/BMP/GIF.")
+            await ctx.reply("âŒ Chá»‰ há»— trá»£ PNG/JPG/BMP/GIF.")
             return
         img_data = await att.read()
         try:
             pil_img = Image.open(BytesIO(img_data)).convert("RGB")
         except Exception:
-            await ctx.reply("❌ Không đọc được ảnh.")
+            await ctx.reply("âŒ KhÃ´ng Ä‘á»c Ä‘Æ°á»£c áº£nh.")
             return
         p2b_sessions[uid] = {"original": pil_img.copy(), "img": pil_img, "canvas_w": 192, "canvas_h": 63, "pos_x": 0, "pos_y": 0, "threshold": 128, "invert": False, "adjustments": [], "dither": 0, "bits": None, "processed_image": None, "msg_id": None}
         bits = process_p2b(p2b_sessions[uid])
@@ -1755,7 +1740,7 @@ async def p(ctx):
             await ctx.reply(embed=result)
         return
 
-    await ctx.reply("❌ Bạn chưa có session P2B. Gửi ảnh kèm `c!p` để bắt đầu.", view=P2BTutorialButton())
+    await ctx.reply("âŒ Báº¡n chÆ°a cÃ³ session P2B. Gá»­i áº£nh kÃ¨m `c!p` Ä‘á»ƒ báº¯t Ä‘áº§u.", view=P2BTutorialButton())
 
 def handle_p2b_command(uid, text):
     s = p2b_sessions.get(uid)
@@ -1767,7 +1752,7 @@ def handle_p2b_command(uid, text):
 
     if cmd == "exit":
         del p2b_sessions[uid]
-        return "👋 Đã thoát P2B."
+        return "ðŸ‘‹ ÄÃ£ thoÃ¡t P2B."
     if cmd == "help":
         return build_p2b_help()
 
@@ -1805,7 +1790,7 @@ def handle_p2b_command(uid, text):
             s["canvas_h"] = max(1, min(500, int(m.group(2))))
             changed = True
         else:
-            return "❌ Sai cú pháp! Dùng `size <rộng>x<cao>` (vd: `size 192x63`)"
+            return "âŒ Sai cÃº phÃ¡p! DÃ¹ng `size <rá»™ng>x<cao>` (vd: `size 192x63`)"
     elif cmd == "threshold" and len(parts) >= 2:
         try:
             s["threshold"] = max(0, min(255, int(parts[1])))
@@ -1992,41 +1977,41 @@ async def h2i(ctx, *, args=None):
             hex_data = args
     hex_data = await get_input_text(ctx, hex_data)
     if not hex_data:
-        await ctx.reply("❌ Cần hex data. VD: `c!h2i FF 00 AA` hoặc gửi file `.txt` kèm lệnh")
+        await ctx.reply("âŒ Cáº§n hex data. VD: `c!h2i FF 00 AA` hoáº·c gá»­i file `.txt` kÃ¨m lá»‡nh")
         return
     try:
         hex_data = hex_data or ""
         hex_clean = hex_data.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
         if not hex_clean:
-            await ctx.reply("❌ Ko có dữ liệu hex!")
+            await ctx.reply("âŒ Ko cÃ³ dá»¯ liá»‡u hex!")
             return
         if not all(c in "0123456789abcdefABCDEF" for c in hex_clean):
             matches = re.findall(r'\b[0-9a-fA-F]{2}\b', hex_data)
             hex_clean = "".join(matches)
             if not hex_clean:
-                await ctx.reply("❌ Hex ko hợp lệ! Chỉ gồm 0-9 A-F.")
+                await ctx.reply("âŒ Hex ko há»£p lá»‡! Chá»‰ gá»“m 0-9 A-F.")
                 return
         if len(hex_clean) % 2 != 0:
-            await ctx.reply("❌ Hex phải có độ dài chẵn!")
+            await ctx.reply("âŒ Hex pháº£i cÃ³ Ä‘á»™ dÃ i cháºµn!")
             return
         buf = hex_to_image(hex_clean, width, height)
         file = discord.File(buf, "bitmap.png")
-        embed = discord.Embed(title="🖼️ Hex → Image", color=0x5865f2)
-        embed.add_field(name="📐 Kích thước", value=f"{width}×{height}", inline=True)
+        embed = discord.Embed(title="ðŸ–¼ï¸ Hex â†’ Image", color=0x5865f2)
+        embed.add_field(name="ðŸ“ KÃ­ch thÆ°á»›c", value=f"{width}Ã—{height}", inline=True)
         embed.set_image(url="attachment://bitmap.png")
         await ctx.reply(file=file, embed=embed)
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi: {e}")
+        await ctx.reply(f"âŒ Lá»—i: {e}")
 
 @bot.command(name="hexsplit")
 async def hexsplit(ctx, *, hex_str=None):
     hex_str = await get_input_text(ctx, hex_str)
     if not hex_str:
-        await ctx.reply("❌ Cần hex để split. VD: `c!hexsplit FD243030DA7B3130` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n hex Ä‘á»ƒ split. VD: `c!hexsplit FD243030DA7B3130` hoáº·c gá»­i file `.txt`")
         return
     hex_str = hex_str.replace(" ", "").replace("\n", "")
     if not all(c in "0123456789abcdefABCDEF" for c in hex_str):
-        await ctx.reply("❌ Hex ko hợp lệ!")
+        await ctx.reply("âŒ Hex ko há»£p lá»‡!")
         return
     bytes_list = [hex_str[i:i+2] for i in range(0, len(hex_str), 2)]
     lines = []
@@ -2043,19 +2028,19 @@ async def hexsplit(ctx, *, hex_str=None):
 async def transhex(ctx, *, hex_str=None):
     hex_str = await get_input_text(ctx, hex_str)
     if not hex_str:
-        await ctx.reply("❌ Cần hex để dịch. VD: `c!transhex FD 24 30 30` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n hex Ä‘á»ƒ dá»‹ch. VD: `c!transhex FD 24 30 30` hoáº·c gá»­i file `.txt`")
         return
     try:
         result = decompile(hex_str)
         await ctx.reply(f"```asm\n{result[:1900]}\n```" if len(result) > 1900 else f"```asm\n{result}\n```")
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi dịch hex: {e}")
+        await ctx.reply(f"âŒ Lá»—i dá»‹ch hex: {e}")
 
 @bot.command(name="dichhex")
 async def dichhex(ctx, *, hex_str=None):
     hex_str = await get_input_text(ctx, hex_str)
     if not hex_str:
-        await ctx.reply("❌ Cần hex để dịch. VD: `c!dichhex 00 FF 00 FF` hoặc gửi file `.txt`")
+        await ctx.reply("âŒ Cáº§n hex Ä‘á»ƒ dá»‹ch. VD: `c!dichhex 00 FF 00 FF` hoáº·c gá»­i file `.txt`")
         return
     try:
         hex_str = hex_str.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
@@ -2070,27 +2055,27 @@ async def dichhex(ctx, *, hex_str=None):
             height = total_bits // 192
         buf = hex_to_image(hex_str, width, height)
         file = discord.File(buf, "bitmap.png")
-        embed = discord.Embed(title="🖼️ Dịch Hex → Bitmap", color=0x5865f2)
-        embed.add_field(name="📐 Kích thước", value=f"{width}×{height}", inline=True)
-        embed.add_field(name="📦 Bytes", value=str(len(bytes_list)), inline=True)
+        embed = discord.Embed(title="ðŸ–¼ï¸ Dá»‹ch Hex â†’ Bitmap", color=0x5865f2)
+        embed.add_field(name="ðŸ“ KÃ­ch thÆ°á»›c", value=f"{width}Ã—{height}", inline=True)
+        embed.add_field(name="ðŸ“¦ Bytes", value=str(len(bytes_list)), inline=True)
         embed.set_image(url="attachment://bitmap.png")
         hex_formatted = " ".join(f"{b:02X}" for b in bytes_list[:48])
         if len(bytes_list) > 48:
             hex_formatted += "..."
-        embed.add_field(name="📝 Hex", value=f"```\n{hex_formatted}\n```", inline=False)
+        embed.add_field(name="ðŸ“ Hex", value=f"```\n{hex_formatted}\n```", inline=False)
         await ctx.reply(file=file, embed=embed)
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi: {e}")
+        await ctx.reply(f"âŒ Lá»—i: {e}")
 
 @bot.command(name="ganhex")
 async def ganhex(ctx, *, hex_str=None):
     hex_str = await get_input_text(ctx, hex_str)
     if not hex_str:
-        await ctx.reply("❌ Cần hex để gán. VD: `c!ganhex FD243030DA7B3130FE03E0E930D7`")
+        await ctx.reply("âŒ Cáº§n hex Ä‘á»ƒ gÃ¡n. VD: `c!ganhex FD243030DA7B3130FE03E0E930D7`")
         return
     hex_str = hex_str.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
     if not all(c in "0123456789abcdefABCDEF" for c in hex_str):
-        await ctx.reply("❌ Hex ko hợp lệ! Chỉ gồm 0-9 A-F.")
+        await ctx.reply("âŒ Hex ko há»£p lá»‡! Chá»‰ gá»“m 0-9 A-F.")
         return
     bytes_list = [hex_str[i:i+2] for i in range(0, len(hex_str), 2)]
     lines = []
@@ -2103,14 +2088,14 @@ async def ganhex(ctx, *, hex_str=None):
         file=discord.File(result.encode(), "hex_data.txt")
     )
 
-# Auto-chat: thỉnh thoảng chat linh tinh ở kênh joined
+# Auto-chat: thá»‰nh thoáº£ng chat linh tinh á»Ÿ kÃªnh joined
 auto_chat_topics = [
-    "hỏi thăm mọi người trong kênh hôm nay thế nào",
-    "kêu ca về thời tiết hôm nay",
-    "nói gì đó về chính trị thế giới kiểu báo mới",
-    "kể chuyện vui về đời sống",
-    "hỏi có ai cần giúp gì về CASIO ko",
-    "nói mấy câu Gen Z láo láo về cuộc sống",
+    "há»i thÄƒm má»i ngÆ°á»i trong kÃªnh hÃ´m nay tháº¿ nÃ o",
+    "kÃªu ca vá» thá»i tiáº¿t hÃ´m nay",
+    "nÃ³i gÃ¬ Ä‘Ã³ vá» chÃ­nh trá»‹ tháº¿ giá»›i kiá»ƒu bÃ¡o má»›i",
+    "ká»ƒ chuyá»‡n vui vá» Ä‘á»i sá»‘ng",
+    "há»i cÃ³ ai cáº§n giÃºp gÃ¬ vá» CASIO ko",
+    "nÃ³i máº¥y cÃ¢u Gen Z lÃ¡o lÃ¡o vá» cuá»™c sá»‘ng",
 ]
 
 @tasks.loop(hours=2)
@@ -2123,7 +2108,7 @@ async def auto_chat_loop():
         return
     topic = random.choice(auto_chat_topics)
     try:
-        prompt = f"Hãy nói {topic}, chỉ 1-2 câu, phong cách Gen Z, láo láo tí, ko cần kiến thức CASIO. Có thể dùng emoji."
+        prompt = f"HÃ£y nÃ³i {topic}, chá»‰ 1-2 cÃ¢u, phong cÃ¡ch Gen Z, lÃ¡o lÃ¡o tÃ­, ko cáº§n kiáº¿n thá»©c CASIO. CÃ³ thá»ƒ dÃ¹ng emoji."
         resp = await call_gemini(model=MODEL, contents=prompt, max_retries=1)
         text = fix_emoji(resp.text.strip(), ch.guild if hasattr(ch, 'guild') else None)
         await ch.send(text)
@@ -2135,10 +2120,10 @@ async def before_auto_chat():
     await bot.wait_until_ready()
 
 if __name__ == "__main__":
-    if not DISCORD_TOKEN or not GEMINI_API_KEY:
-        print("LỖI: Vui lòng kiểm tra lại cấu hình DISCORD_TOKEN và GEMINI_API_KEY trong file .env!")
+    if not DISCORD_TOKEN or not API_KEY:
+        print("Lá»–I: Vui lÃ²ng kiá»ƒm tra láº¡i cáº¥u hÃ¬nh DISCORD_TOKEN vÃ  API_KEY trong file .env!")
     elif not MODEL:
-        print("LỖI: Vui lòng kiểm tra biến MODEL trong file .env!")
+        print("Lá»–I: Vui lÃ²ng kiá»ƒm tra biáº¿n MODEL trong file .env!")
     else:
         def console_chat():
             while True:
@@ -2152,9 +2137,9 @@ if __name__ == "__main__":
                         if ch:
                             coro = ch.send(text)
                             asyncio.run_coroutine_threadsafe(coro, bot.loop)
-                            print(f"[Console] Đã gửi: {text[:50]}...")
+                            print(f"[Console] ÄÃ£ gá»­i: {text[:50]}...")
                 except Exception as e:
-                    print(f"[Console] Lỗi: {e}")
+                    print(f"[Console] Lá»—i: {e}")
         t = threading.Thread(target=console_chat, daemon=True)
         t.start()
         bot.run(DISCORD_TOKEN)
