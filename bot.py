@@ -1,7 +1,8 @@
 import threading, http.server
 import discord
 from discord.ext import commands, tasks
-from openai import AsyncOpenAI
+import google.genai as genai
+from google.genai import types
 import os
 import sys
 import subprocess
@@ -10,6 +11,7 @@ import re
 import io
 import math
 import random
+import threading
 import asyncio
 from io import BytesIO
 from PIL import Image, ImageFilter, ImageOps, ImageEnhance, ImageDraw
@@ -30,15 +32,12 @@ dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(dotenv_path)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-API_KEY = os.getenv("API_KEY")
-BASE_URL = os.getenv("BASE_URL", "https://sarsed.eu.cc/v1")
-MODEL = os.getenv("MODEL", "oc/union-alpha")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+MODEL = os.getenv("MODEL", "gpt-4o-mini")
 KNOWLEDGE_FILE = os.getenv("KNOWLEDGE_FILE", "knowledge.txt")
 LEARNED_KNOWLEDGE_FILE = "knowledge_learned.txt"
 CHANNELS_FILE = "joined_channels.json"
 PERSONA_FILE = os.getenv("PERSONA_FILE", "persona.txt")
-MAX_LEARNED_CHARS = 20000  # chỉ lấy phần cuối kiến thức học được để khỏi tràn context
-
 
 def load_file(path):
     try:
@@ -47,21 +46,17 @@ def load_file(path):
     except FileNotFoundError:
         return ""
 
-
 def save_file(path, content):
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
-
 
 def append_file(path, content):
     with open(path, "a", encoding="utf-8") as f:
         f.write("\n" + content.strip() + "\n")
 
-
 def fix_emoji(text, guild=None):
     if guild:
         emoji_map = {e.name: f"<:{e.name}:{e.id}>" for e in guild.emojis}
-
         def repl(m):
             return emoji_map.get(m.group(1), m.group(0))
         text = re.sub(r'<:([^:]+):\d*>', r':\1:', text)
@@ -69,7 +64,6 @@ def fix_emoji(text, guild=None):
     else:
         text = re.sub(r'<:([^:]+):\d*>', r':\1:', text)
     return text
-
 
 def split_message(text, max_len=2000):
     if len(text) <= max_len:
@@ -91,7 +85,6 @@ def split_message(text, max_len=2000):
         chunks.append(chunk)
     return chunks
 
-
 ALLOWED_FILES = [".env", "persona.txt", "knowledge.txt", "knowledge_learned.txt"]
 ALLOWED_FILE_USERS = [1173632231474995281, 1046054858580561960, 1358317538869776395]
 SPECIAL_USERS = {
@@ -107,31 +100,19 @@ HD580_COMPILER = os.path.join(HD580_DIR, "compiler_.py")
 HD880_DIR = os.path.join(BASE_DIR, "hdcompiler_vn", "880btg")
 HD880_COMPILER = os.path.join(HD880_DIR, "compiler_.py")
 
-
-def is_admin(ctx):
-    return ctx.author.id in ALLOWED_FILE_USERS
-
-
-admin_only = commands.check(is_admin)
-
-
 def get_file_info(path):
     try:
         size = os.path.getsize(path)
         modified = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
         preview = load_file(path)[:200].replace("\n", " ")[:200]
         return size, modified, preview
-    except Exception:
+    except:
         return None, None, None
-
 
 def update_env_var(key, value):
     try:
-        try:
-            with open(dotenv_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            lines = []
+        with open(".env", "r", encoding="utf-8") as f:
+            lines = f.readlines()
         found = False
         for i, line in enumerate(lines):
             if line.strip().startswith(key + "="):
@@ -140,46 +121,39 @@ def update_env_var(key, value):
                 break
         if not found:
             lines.append(f"{key}={value}\n")
-        with open(dotenv_path, "w", encoding="utf-8") as f:
+        with open(".env", "w", encoding="utf-8") as f:
             f.writelines(lines)
         return True
-    except Exception:
+    except:
         return False
-
 
 def load_api_keys():
     try:
         with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
             keys = [line.strip() for line in f if line.strip()]
-        if keys:
-            return keys
+        return keys if keys else [GEMINI_API_KEY]
     except FileNotFoundError:
-        pass
-    return [API_KEY] if API_KEY else []
-
+        return [GEMINI_API_KEY]
 
 def load_key_index():
     try:
         with open(API_KEY_INDEX_FILE, "r") as f:
             return int(f.read().strip())
-    except Exception:
+    except:
         return 0
-
 
 def save_key_index(idx):
     try:
         with open(API_KEY_INDEX_FILE, "w") as f:
             f.write(str(idx))
-    except Exception:
+    except:
         pass
-
 
 api_keys = load_api_keys()
 api_key_index = load_key_index()
 if api_key_index >= len(api_keys):
     api_key_index = 0
-if api_keys:
-    API_KEY = api_keys[api_key_index]
+GEMINI_API_KEY = api_keys[api_key_index]
 
 KNOWLEDGE_BASE = load_file(KNOWLEDGE_FILE)
 KNOWLEDGE_LEARNED = load_file(LEARNED_KNOWLEDGE_FILE)
@@ -187,7 +161,6 @@ PERSONA = load_file(PERSONA_FILE)
 
 if not PERSONA:
     PERSONA = "Bạn là một trợ lý ảo Discord thân thiện, thông minh và hài hước."
-
 
 def refresh_globals(filename):
     global KNOWLEDGE_BASE, KNOWLEDGE_LEARNED, PERSONA
@@ -198,22 +171,19 @@ def refresh_globals(filename):
     elif filename == "persona.txt":
         PERSONA = load_file(PERSONA_FILE)
 
-
 def get_full_knowledge():
     parts = []
     if KNOWLEDGE_BASE:
         parts.append(f"Kiến thức gốc:\n{KNOWLEDGE_BASE}")
     if KNOWLEDGE_LEARNED:
-        parts.append(f"Kiến thức học được từ người dùng:\n{KNOWLEDGE_LEARNED[-MAX_LEARNED_CHARS:]}")
+        parts.append(f"Kiến thức học được từ người dùng:\n{KNOWLEDGE_LEARNED}")
     return "\n\n".join(parts)
-
 
 def get_system_prompt():
     knowledge = get_full_knowledge()
     if knowledge:
         return PERSONA + "\n\n" + knowledge
     return PERSONA
-
 
 def get_user_context(member):
     if not member:
@@ -223,45 +193,43 @@ def get_user_context(member):
     uid = member.id
     if uid in SPECIAL_USERS:
         lines.append(f"Danh hiệu: {SPECIAL_USERS[uid]}")
-    user_roles = [r.name for r in getattr(member, "roles", []) if r.name != "@everyone"]
+    user_roles = [r.name for r in member.roles if r.name != "@everyone"]
     contributor_roles_found = [r for r in user_roles if r.lower() in CONTRIBUTOR_ROLES]
     if contributor_roles_found:
         lines.append(f"Vai trò trong server: {', '.join(contributor_roles_found)}")
     return "\n".join(lines)
 
-
-# ================= OpenAI client =================
-genai_client = AsyncOpenAI(api_key=API_KEY or "missing", base_url=BASE_URL)
-api_exhausted_until = 0
-
-
 def switch_api_key():
-    global api_key_index, API_KEY, genai_client
-    if len(api_keys) < 2:
-        return
+    global api_key_index, GEMINI_API_KEY, genai_client
     api_key_index = (api_key_index + 1) % len(api_keys)
-    API_KEY = api_keys[api_key_index]
-    genai_client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
+    GEMINI_API_KEY = api_keys[api_key_index]
+    genai_client = genai.Client(api_key=GEMINI_API_KEY)
     save_key_index(api_key_index)
     print(f"[API] Đã chuyển sang key #{api_key_index}")
 
-
-async def call_ai(messages, max_retries=2):
-    """messages: list dict {"role": "system|user|assistant", "content": str}"""
+async def call_gemini(model, contents, config=None, max_retries=None):
+    global api_exhausted_until
     now = time.time()
     if now < api_exhausted_until:
         raise Exception(f"API đang trong thời gian chờ, thử lại sau {int(api_exhausted_until - now)}s")
+    if max_retries is None:
+        max_retries = len(api_keys)
+    last_err = None
     for attempt in range(max_retries):
         try:
-            r = await genai_client.chat.completions.create(model=MODEL, messages=messages)
-            return r.choices[0].message.content or ""
+            return await genai_client.aio.models.generate_content(
+                model=model, contents=contents, config=config
+            )
         except Exception as e:
-            print(f"[API] Lỗi: {e}")
-            if attempt + 1 >= max_retries:
-                raise
-            switch_api_key()
-            await asyncio.sleep(1)
-
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                print(f"[API] Key #{api_key_index} hết quota, đang chuyển...")
+                switch_api_key()
+                last_err = e
+                continue
+            raise
+    api_exhausted_until = now + 60
+    raise last_err or Exception("Tất cả API keys đều hết quota")
 
 def load_joined_channels():
     try:
@@ -270,11 +238,9 @@ def load_joined_channels():
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
-
 def save_joined_channels(channels):
     with open(CHANNELS_FILE, "w") as f:
         json.dump(channels, f)
-
 
 joined_channels = load_joined_channels()
 
@@ -284,56 +250,30 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="c!", intents=intents, help_command=None)
 
-
-class _Ping(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"ok")
-
-    def log_message(self, *a):
-        pass
-
-
 def start_keepalive():
     port = int(os.getenv("PORT", 8080))
-    try:
-        srv = http.server.HTTPServer(("0.0.0.0", port), _Ping)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-    except OSError as e:
-        print(f"[Keepalive] Không mở được port {port}: {e}")
-
-
+    srv = http.server.HTTPServer(("0.0.0.0", port), http.server.SimpleHTTPRequestHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
 start_keepalive()
+
+genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 snipe_store = {}
 console_channel_id = None
 conversation_memory = {}
 MAX_MEMORY = 40
-
+api_exhausted_until = 0
 
 @bot.event
 async def on_ready():
     print(f"--- Bot đã online thành công với tên: {bot.user} ---")
     print(f"Đang theo dõi {len(joined_channels)} kênh tự động: {joined_channels}")
+    global console_channel_id
     if console_channel_id:
         ch = bot.get_channel(console_channel_id)
         if ch:
             print(f"Console chat đang gửi đến: #{ch.name} ({console_channel_id})")
-    if not auto_chat_loop.is_running():
-        auto_chat_loop.start()
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CheckFailure):
-        await ctx.reply("❌ Bạn không có quyền dùng lệnh này.")
-    elif isinstance(error, commands.CommandNotFound):
-        return
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.reply(f"❌ Thiếu tham số: `{error.param.name}`")
-    else:
-        print(f"[CMD] Lỗi: {error}")
+    auto_chat_loop.start()
 
 
 @bot.event
@@ -347,7 +287,6 @@ async def on_message_delete(message):
         "time": message.created_at
     }
 
-
 @bot.command(name="join")
 async def join(ctx):
     if ctx.channel.id in joined_channels:
@@ -357,9 +296,7 @@ async def join(ctx):
         save_joined_channels(joined_channels)
         await ctx.reply("✅ Đã tham gia kênh này! Mình sẽ tự động trả lời mọi câu hỏi ở đây.")
 
-
 @bot.command(name="learn")
-@admin_only
 async def learn(ctx, *, content):
     global KNOWLEDGE_LEARNED, KNOWLEDGE_BASE
     append_file(LEARNED_KNOWLEDGE_FILE, content)
@@ -367,9 +304,7 @@ async def learn(ctx, *, content):
     KNOWLEDGE_BASE = load_file(KNOWLEDGE_FILE)
     await ctx.reply("✅ Mình đã ghi nhớ thông tin này!")
 
-
 @bot.command(name="study")
-@admin_only
 async def study(ctx, limit: int = 1000):
     global KNOWLEDGE_LEARNED
     if limit > 100000:
@@ -397,29 +332,23 @@ async def study(ctx, limit: int = 1000):
         KNOWLEDGE_LEARNED = load_file(LEARNED_KNOWLEDGE_FILE)
         await msg.edit(content=f"✅ Đã học xong {len(lines)} tin nhắn!")
 
-
 @bot.command(name="api")
-@admin_only
 async def api(ctx, *, api_key):
-    global API_KEY, genai_client
-    API_KEY = api_key.strip()
-    genai_client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
-    update_env_var("API_KEY", API_KEY)
-    try:
-        await ctx.message.delete()  # xoá tin nhắn chứa key
-    except Exception:
-        pass
-    await ctx.send("✅ Đã cập nhật API key thành công!")
-
+    global GEMINI_API_KEY, genai_client, api_keys, api_key_index
+    GEMINI_API_KEY = api_key
+    api_keys = [api_key]
+    api_key_index = 0
+    genai_client = genai.Client(api_key=GEMINI_API_KEY)
+    save_key_index(0)
+    update_env_var("GEMINI_API_KEY", api_key)
+    await ctx.reply("✅ Đã cập nhật API key thành công!")
 
 @bot.command(name="model")
-@admin_only
 async def model(ctx, *, model):
     global MODEL
-    MODEL = model.strip()
-    update_env_var("MODEL", MODEL)
-    await ctx.reply(f"✅ Đã chuyển sang model: {MODEL}")
-
+    MODEL = model
+    update_env_var("MODEL", model)
+    await ctx.reply(f"✅ Đã chuyển sang model: {model}")
 
 @bot.command(name="reset")
 async def reset(ctx):
@@ -427,25 +356,18 @@ async def reset(ctx):
     conversation_memory.pop(cid, None)
     await ctx.reply("🧹 Đã xóa bộ nhớ hội thoại cho kênh này!")
 
-
-def _mask(k):
-    return k[:4] + "..." + k[-4:] if len(k) > 10 else "***"
-
-
 @bot.command(name="keys")
-@admin_only
 async def keys(ctx):
     total = len(api_keys)
-    current = _mask(api_keys[api_key_index]) if api_keys else "N/A"
+    mask = lambda k: k[:8] + "..." + k[-4:]
+    current = mask(api_keys[api_key_index]) if api_keys else "N/A"
     lines = [f"🔑 **API Keys**: {total} keys\n**Đang dùng**: #{api_key_index} - `{current}`"]
     for i, k in enumerate(api_keys):
         mark = " ✅" if i == api_key_index else ""
-        lines.append(f"`#{i}` {_mask(k)}{mark}")
+        lines.append(f"`#{i}` {mask(k)}{mark}")
     await ctx.reply("\n".join(lines))
 
-
 @bot.command(name="addkey")
-@admin_only
 async def addkey(ctx, *, api_key):
     global api_keys
     api_key = api_key.strip()
@@ -462,15 +384,9 @@ async def addkey(ctx, *, api_key):
     except Exception as e:
         await ctx.reply(f"✅ Đã thêm key nhưng lỗi ghi file: {e}")
         return
-    try:
-        await ctx.message.delete()
-    except Exception:
-        pass
-    await ctx.send(f"✅ Đã thêm API key #{len(api_keys) - 1}!")
-
+    await ctx.reply(f"✅ Đã thêm API key #{len(api_keys) - 1}!")
 
 @bot.command(name="addkeyat")
-@admin_only
 async def addkeyat(ctx, index: int, *, api_key):
     global api_keys, api_key_index
     api_key = api_key.strip()
@@ -484,7 +400,7 @@ async def addkeyat(ctx, index: int, *, api_key):
         await ctx.reply("⚠️ Key này đã có trong danh sách!")
         return
     api_keys.insert(index, api_key)
-    if index <= api_key_index and len(api_keys) > 1:
+    if index <= api_key_index:
         api_key_index += 1
         save_key_index(api_key_index)
     try:
@@ -493,12 +409,7 @@ async def addkeyat(ctx, index: int, *, api_key):
     except Exception as e:
         await ctx.reply(f"✅ Đã thêm key nhưng lỗi ghi file: {e}")
         return
-    try:
-        await ctx.message.delete()
-    except Exception:
-        pass
-    await ctx.send(f"✅ Đã thêm API key vào vị trí #{index}!")
-
+    await ctx.reply(f"✅ Đã thêm API key vào vị trí #{index}!")
 
 @bot.command(name="file")
 async def file(ctx, action=None, filename=None, *, content=None):
@@ -510,9 +421,7 @@ async def file(ctx, action=None, filename=None, *, content=None):
         for f in ALLOWED_FILES:
             size, modified, preview = get_file_info(f)
             if size is not None:
-                # không hiện preview của .env để khỏi lộ token
-                pv = "(ẩn)" if f == ".env" else preview
-                val = f"**Size:** {size} bytes\n**Sửa lần cuối:** {modified}\n**Preview:** `{pv}`"
+                val = f"**Size:** {size} bytes\n**Sửa lần cuối:** {modified}\n**Preview:** `{preview}`"
             else:
                 val = "*File chưa tồn tại*"
             embed.add_field(name=f"`{f}`", value=val, inline=False)
@@ -557,15 +466,12 @@ async def file(ctx, action=None, filename=None, *, content=None):
     else:
         await ctx.reply("❌ Action không hợp lệ. Dùng: `view`, `write`, `append`")
 
-
 @bot.command(name="restart")
-@admin_only
 async def restart(ctx):
     await ctx.reply("🔄 Đang khởi động lại...")
     await bot.close()
     subprocess.Popen([sys.executable] + sys.argv)
     os._exit(0)
-
 
 # ================= GADGET DB + ENGINE =================
 raw_gadget_list = [
@@ -742,10 +648,8 @@ VALUE_TO_NAME = {
 VALUE_TO_HEX = {v: k for k, v in VALUE_TO_NAME.items()}
 HEX_PAIR = re.compile(r'^[0-9a-fA-F]{2}$')
 
-
 def is_pure_pop_gadget(name):
     return bool(name and re.match(r'^pop\s+[a-z0-9]+$', name.strip(), re.IGNORECASE))
-
 
 def get_pop_sizes(name):
     if not name:
@@ -753,82 +657,58 @@ def get_pop_sizes(name):
     sizes = []
     for m in re.finditer(r'pop\s+([a-z0-9]+)', name, re.IGNORECASE):
         t = m.group(1).lower()
-        if t in ('rt', 'pop', 'sp'):
-            continue
-        if t in ('ea', 'pc'):
-            sizes.append(2)
-        elif t == 'psw':
-            sizes.append(1)
-        elif t.startswith('qr'):
-            sizes.extend([2] * 4)
-        elif t.startswith('xr'):
-            sizes.extend([2] * 2)
-        elif t.startswith('er'):
-            sizes.append(2)
-        elif t.startswith('r'):
-            sizes.append(1)
+        if t in ('rt', 'pop', 'sp'): continue
+        if t in ('ea', 'pc'): sizes.append(2)
+        elif t == 'psw': sizes.append(1)
+        elif t.startswith('qr'): sizes.extend([2]*4)
+        elif t.startswith('xr'): sizes.extend([2]*2)
+        elif t.startswith('er'): sizes.append(2)
+        elif t.startswith('r'): sizes.append(1)
     return sizes if sizes else None
-
 
 def get_pop_bytes_count(name):
     s = get_pop_sizes(name)
     return sum(s) if s else 0
 
-
 def get_pop_registers(name):
     return [m.group(1) for m in re.finditer(r'pop\s+([a-z0-9]+)', name, re.IGNORECASE)]
 
-
 def normalize_address(addr):
-    if addr == 0x09c21:
-        return 0x09c20
-    if addr == 0x0947e:
-        return 0x0947c
-    if (addr & 1) and (addr - 1) in GADGET_MAP:
-        return addr - 1
+    if addr == 0x09c21: return 0x09c20
+    if addr == 0x0947e: return 0x0947c
+    if (addr & 1) and (addr - 1) in GADGET_MAP: return addr - 1
     return addr
 
-
 def hex_to_bytes(h):
-    c = h.replace(" ", "").replace("\n", "").replace("\r", "")
-    if not c:
-        return []
-    if len(c) % 2:
-        c = c[:-1]
-    return [int(c[i:i + 2], 16) for i in range(0, len(c), 2)]
-
+    c = h.replace(" ","").replace("\n","").replace("\r","")
+    if not c: return []
+    if len(c) % 2: c = c[:-1]
+    return [int(c[i:i+2],16) for i in range(0,len(c),2)]
 
 def parse_to_items(bytes_data, start_addr=0xd730):
     items = []
-    offset = 0
-    i = 0
+    offset = 0; i = 0
     while i < len(bytes_data):
         ra = start_addr + offset
         if i + 3 < len(bytes_data):
-            zz, yy, third, fourth = bytes_data[i], bytes_data[i + 1], bytes_data[i + 2], bytes_data[i + 3]
+            zz, yy, third, fourth = bytes_data[i], bytes_data[i+1], bytes_data[i+2], bytes_data[i+3]
             if 0x30 <= third <= 0x39 and fourth == 0x30:
                 X = third - 0x30
                 raw = (X << 16) | (yy << 8) | zz
                 if raw == 0x03030:
-                    items.append({'type': 'data', 'hexBytes': [zz], 'value': zz, 'ramAddr': ra})
-                    offset += 1
-                    ra = start_addr + offset
-                    items.append({'type': 'data', 'hexBytes': [yy], 'value': yy, 'ramAddr': ra})
-                    i += 2
-                    offset += 1
-                    continue
+                    items.append({'type':'data','hexBytes':[zz],'value':zz,'ramAddr':ra})
+                    offset+=1; ra=start_addr+offset
+                    items.append({'type':'data','hexBytes':[yy],'value':yy,'ramAddr':ra})
+                    i+=2; offset+=1; continue
                 if raw < MIN_VALID_CALL_ADDR:
-                    for b in [zz, yy, third, fourth]:
-                        items.append({'type': 'data', 'hexBytes': [b], 'value': b, 'ramAddr': ra})
-                        offset += 1
-                        ra = start_addr + offset
-                    i += 4
-                    continue
+                    for b in [zz,yy,third,fourth]:
+                        items.append({'type':'data','hexBytes':[b],'value':b,'ramAddr':ra})
+                        offset+=1; ra=start_addr+offset
+                    i+=4; continue
                 fa = normalize_address(raw)
                 name = GADGET_MAP.get(fa)
-                items.append({'type': 'call', 'hexBytes': [zz, yy, third, fourth], 'addr': fa, 'name': name, 'ramAddr': ra, 'popGrouped': False})
-                i += 4
-                offset += 4
+                items.append({'type':'call','hexBytes':[zz,yy,third,fourth],'addr':fa,'name':name,'ramAddr':ra,'popGrouped':False})
+                i+=4; offset+=4
                 if name and name not in SPECIAL_NO_POP_GADGETS:
                     ps = get_pop_sizes(name)
                     if ps:
@@ -836,63 +716,56 @@ def parse_to_items(bytes_data, start_addr=0xd730):
                         if i + tb <= len(bytes_data):
                             for sz in ps:
                                 for _ in range(sz):
-                                    items.append({'type': 'data', 'hexBytes': [bytes_data[i]], 'value': bytes_data[i], 'ramAddr': start_addr + offset})
-                                    i += 1
-                                    offset += 1
+                                    items.append({'type':'data','hexBytes':[bytes_data[i]],'value':bytes_data[i],'ramAddr':start_addr+offset})
+                                    i+=1; offset+=1
                             continue
                 continue
-        items.append({'type': 'data', 'hexBytes': [bytes_data[i]], 'value': bytes_data[i], 'ramAddr': ra})
-        i += 1
-        offset += 1
+        items.append({'type':'data','hexBytes':[bytes_data[i]],'value':bytes_data[i],'ramAddr':ra})
+        i+=1; offset+=1
     return items
-
 
 def add_label_references(items):
     addr_to_idx = {}
     for idx, it in enumerate(items):
-        if it['type'] == 'label':
-            continue
+        if it['type'] == 'label': continue
         size = 4 if it['type'] == 'call' else len(it['hexBytes'])
         for b in range(size):
             addr_to_idx[it['ramAddr'] + b] = (idx, b)
-
+            
     label_map = {}
     lc = 1
     i = 0
     while i < len(items) - 1:
-        it0, it1 = items[i], items[i + 1]
+        it0, it1 = items[i], items[i+1]
         if it0['type'] != 'data' or it1['type'] != 'data' or len(it0['hexBytes']) != 1 or len(it1['hexBytes']) != 1:
-            i += 1
-            continue
-
+            i += 1; continue
+            
         val = (it1['value'] << 8) | it0['value']
         target = addr_to_idx.get(val)
-
+        
         if target is None:
-            i += 1
-            continue
-
+            i += 1; continue
+            
         tgt_idx, offset = target
         tgt_item = items[tgt_idx]
         base = tgt_item['ramAddr']
-
+        
         if base not in label_map:
             label_map[base] = {'name': f'label{lc}', 'insert_idx': tgt_idx}
             lc += 1
-
+            
         it0['labelRef'] = {'label': label_map[base]['name'], 'offset': offset}
         i += 2
-
+        
     labels = []
     for addr, info in label_map.items():
         labels.append({'type': 'label', 'label': info['name'], 'insertBefore': info['insert_idx'], 'addr': addr})
-
+        
     labels.sort(key=lambda x: x['insertBefore'], reverse=True)
     for li in labels:
         items.insert(li['insertBefore'], {'type': 'label', 'label': li['label'], 'addr': li['addr']})
-
+        
     return items
-
 
 def mark_pop_groups(items):
     i = 0
@@ -901,8 +774,7 @@ def mark_pop_groups(items):
         if it['type'] == 'call' and it['name'] and is_pure_pop_gadget(it['name']):
             tb = get_pop_bytes_count(it['name'])
             if tb > 0:
-                b = 0
-                j = i + 1
+                b = 0; j = i + 1
                 while j < len(items) and b < tb:
                     if items[j]['type'] == 'data':
                         b += len(items[j]['hexBytes'])
@@ -911,7 +783,6 @@ def mark_pop_groups(items):
                     it['popGrouped'] = True
         i += 1
     return items
-
 
 def format_simple(items):
     out = ["org 0xd730"]
@@ -923,7 +794,7 @@ def format_simple(items):
             out.append(f"{it['label']}:")
             i += 1
             continue
-
+            
         if it['type'] == 'call':
             if it['name']:
                 if is_pure_pop_gadget(it['name']) and it.get('popGrouped'):
@@ -937,7 +808,7 @@ def format_simple(items):
                             consumed.append(items[j])
                             b += len(items[j]['hexBytes'])
                         j += 1
-
+                        
                     vals = []
                     k = 0
                     while k < len(consumed):
@@ -950,9 +821,9 @@ def format_simple(items):
                                 vals.append(f"adr_of {c['labelRef']['label']}")
                             k += 2
                             continue
-
-                        if k + 1 < len(consumed) and 'labelRef' not in consumed[k + 1]:
-                            nxt = consumed[k + 1]
+                            
+                        if k + 1 < len(consumed) and 'labelRef' not in consumed[k+1]:
+                            nxt = consumed[k+1]
                             dv = (nxt['value'] << 8) | c['value']
                             if dv in VALUE_TO_NAME:
                                 vals.append(VALUE_TO_NAME[dv])
@@ -961,11 +832,11 @@ def format_simple(items):
                                 vals.append(f"hex {hs}")
                             k += 2
                             continue
-
+                            
                         hs = ' '.join(f'{b:02x}' for b in c['hexBytes'])
                         vals.append(f"hex {hs}")
                         k += 1
-
+                        
                     out.append(f"{I}{', '.join(regs)} = {', '.join(vals)}")
                     i = j
                     continue
@@ -975,7 +846,7 @@ def format_simple(items):
                 out.append(f"{I}call {it['addr']:05X}")
             i += 1
             continue
-
+            
         if it['type'] == 'data':
             if 'labelRef' in it:
                 offset = it['labelRef'].get('offset', 0)
@@ -985,9 +856,9 @@ def format_simple(items):
                     out.append(f"{I}adr_of {it['labelRef']['label']}")
                 i += 2
                 continue
-
-            if i + 1 < len(items) and items[i + 1]['type'] == 'data' and 'labelRef' not in items[i + 1]:
-                nxt = items[i + 1]
+                
+            if i + 1 < len(items) and items[i+1]['type'] == 'data' and 'labelRef' not in items[i+1]:
+                nxt = items[i+1]
                 dv = (nxt['value'] << 8) | it['value']
                 if dv in VALUE_TO_NAME:
                     out.append(f"{I}{VALUE_TO_NAME[dv]}")
@@ -996,7 +867,7 @@ def format_simple(items):
                     out.append(f"{I}hex {hs}")
                 i += 2
                 continue
-
+                
             hs = ' '.join(f'{b:02x}' for b in it['hexBytes'])
             out.append(f"{I}hex {hs}")
             i += 1
@@ -1004,47 +875,42 @@ def format_simple(items):
         i += 1
     return "\n".join(out)
 
-
 def decompile(hex_str):
     bytes_data = hex_to_bytes(hex_str)
-    if not bytes_data:
-        return ""
+    if not bytes_data: return ""
     items = parse_to_items(bytes_data)
     items = add_label_references(items)
     items = mark_pop_groups(items)
     return format_simple(items)
 
-
 def compile_asm(asm):
     lines = asm.strip().split("\n")
-
+    
     # ------------------ Vòng 1: Quét Label & Tính địa chỉ bộ nhớ ------------------
     org_addr = 0xd730
     current_addr = org_addr
     labels = {}
     instructions = []
-
+    
     for line in lines:
         line = line.split(";")[0].strip()
-        if not line:
-            continue
-
+        if not line: continue
+        
         if line.startswith("org "):
             try:
                 org_str = line[4:].strip()
                 org_addr = int(org_str, 16)
                 current_addr = org_addr
-            except Exception:
-                pass
+            except: pass
             continue
-
+            
         if line.endswith(":"):
             label_name = line[:-1].strip()
             labels[label_name] = current_addr
             continue
-
+            
         instructions.append((line, current_addr))
-
+        
         size = 0
         if line.startswith("hex "):
             size = len(line[4:].strip().split())
@@ -1075,7 +941,7 @@ def compile_asm(asm):
                 tok = tokens[i]
                 if tok == "adr_of":
                     size += 2
-                    if i + 1 < len(tokens) and tokens[i + 1].startswith("[") and tokens[i + 1].endswith("]"):
+                    if i + 1 < len(tokens) and tokens[i+1].startswith("[") and tokens[i+1].endswith("]"):
                         i += 3
                     else:
                         i += 2
@@ -1097,52 +963,49 @@ def compile_asm(asm):
     for line, addr in instructions:
         if line.startswith("hex "):
             for p in line[4:].strip().split():
-                out.append(f"{int(p, 16):02x}")
+                out.append(f"{int(p,16):02x}")
             continue
-
+            
         if line in NAME_MAP:
             addr_val = NAME_MAP[line]
             out.extend([f"{addr_val & 0xFF:02x}", f"{(addr_val >> 8) & 0xFF:02x}", f"{((addr_val >> 16) & 0xF) + 0x30:02x}", "30"])
             continue
-
+            
         if line in VALUE_TO_HEX:
             v = VALUE_TO_HEX[line]
             out.extend([f"{v & 0xFF:02x}", f"{(v >> 8) & 0xFF:02x}"])
             continue
-
+            
         call_match = re.match(r'^call\s+([0-9a-fA-F]+)$', line, re.IGNORECASE)
         if call_match:
             addr_val = int(call_match.group(1), 16)
             out.extend([f"{addr_val & 0xFF:02x}", f"{(addr_val >> 8) & 0xFF:02x}", f"{((addr_val >> 16) & 0xF) + 0x30:02x}", "30"])
             continue
-
+            
         if "=" in line:
             parts = line.split("=", 1)[1].strip()
             for seg in parts.split(","):
                 seg = seg.strip()
                 if seg.startswith("hex "):
                     for p in seg[4:].strip().split():
-                        out.append(f"{int(p, 16):02x}")
+                        out.append(f"{int(p,16):02x}")
                 elif seg.startswith("adr_of"):
                     parts_adr = seg.split()
                     lname = parts_adr[-1]
                     laddr = labels.get(lname, 0)
                     if len(parts_adr) >= 3 and parts_adr[1].startswith("[") and parts_adr[1].endswith("]"):
                         offset_str = parts_adr[1][1:-1]
-                        if offset_str.startswith("+"):
-                            laddr += int(offset_str[1:])
-                        elif offset_str.startswith("-"):
-                            laddr -= int(offset_str[1:])
-                        else:
-                            laddr += int(offset_str)
+                        if offset_str.startswith("+"): laddr += int(offset_str[1:])
+                        elif offset_str.startswith("-"): laddr -= int(offset_str[1:])
+                        else: laddr += int(offset_str)
                     out.extend([f"{laddr & 0xFF:02x}", f"{(laddr >> 8) & 0xFF:02x}"])
                 elif seg in VALUE_TO_HEX:
                     v = VALUE_TO_HEX[seg]
                     out.extend([f"{v & 0xFF:02x}", f"{(v >> 8) & 0xFF:02x}"])
                 elif HEX_PAIR.match(seg):
-                    out.append(f"{int(seg, 16):02x}")
+                    out.append(f"{int(seg,16):02x}")
             continue
-
+            
         tokens = line.replace(",", " ").split()
         i = 0
         while i < len(tokens):
@@ -1150,29 +1013,26 @@ def compile_asm(asm):
             if tok == "adr_of":
                 if i + 1 < len(tokens):
                     offset = 0
-                    if tokens[i + 1].startswith("[") and tokens[i + 1].endswith("]"):
-                        offset_str = tokens[i + 1][1:-1]
-                        if offset_str.startswith("+"):
-                            offset = int(offset_str[1:])
-                        elif offset_str.startswith("-"):
-                            offset = -int(offset_str[1:])
-                        else:
-                            offset = int(offset_str)
+                    if tokens[i+1].startswith("[") and tokens[i+1].endswith("]"):
+                        offset_str = tokens[i+1][1:-1]
+                        if offset_str.startswith("+"): offset = int(offset_str[1:])
+                        elif offset_str.startswith("-"): offset = -int(offset_str[1:])
+                        else: offset = int(offset_str)
                         if i + 2 < len(tokens):
-                            lname = tokens[i + 2]
+                            lname = tokens[i+2]
                             i += 3
                         else:
                             raise ValueError("Thiếu tên label sau `adr_of`")
                     else:
-                        lname = tokens[i + 1]
+                        lname = tokens[i+1]
                         i += 2
-
+                        
                     laddr = labels.get(lname, 0) + offset
                     out.extend([f"{laddr & 0xFF:02x}", f"{(laddr >> 8) & 0xFF:02x}"])
                     continue
                 else:
                     raise ValueError("`adr_of` bị thiếu đối số (cần truyền vào tên Label)")
-
+                    
             if tok in NAME_MAP:
                 addr_val = NAME_MAP[tok]
                 out.extend([f"{addr_val & 0xFF:02x}", f"{(addr_val >> 8) & 0xFF:02x}", f"{((addr_val >> 16) & 0xF) + 0x30:02x}", "30"])
@@ -1180,11 +1040,10 @@ def compile_asm(asm):
                 v = VALUE_TO_HEX[tok]
                 out.extend([f"{v & 0xFF:02x}", f"{(v >> 8) & 0xFF:02x}"])
             elif HEX_PAIR.match(tok):
-                out.append(f"{int(tok, 16):02x}")
+                out.append(f"{int(tok,16):02x}")
             i += 1
-
+            
     return " ".join(out)
-
 
 def extract_codeblock(text):
     text = text.strip()
@@ -1192,14 +1051,13 @@ def extract_codeblock(text):
         text = text[3:]
         idx = text.find("\n")
         if idx != -1:
-            text = text[idx + 1:]
+            text = text[idx+1:]
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
     if text.startswith("`") and text.endswith("`") and not text.startswith("``"):
         return text[1:-1].strip()
     return text
-
 
 def strip_asm_comments(text):
     lines = text.split("\n")
@@ -1210,7 +1068,6 @@ def strip_asm_comments(text):
             continue
         clean.append(line)
     return "\n".join(clean)
-
 
 @bot.command(name="decomp")
 async def decomp(ctx):
@@ -1225,7 +1082,6 @@ async def decomp(ctx):
         await ctx.reply(f"```asm\n{result}\n```" if len(result) <= 1900 else f"```asm\n{result[:1900]}\n```")
     except Exception as e:
         await ctx.reply(f"❌ Lỗi khi giải mã: {e}")
-
 
 @bot.command(name="comp")
 async def comp(ctx):
@@ -1242,23 +1098,22 @@ async def comp(ctx):
     except Exception as e:
         await ctx.reply(f"❌ Có lỗi cú pháp trong mã của bạn:\n> `{e}`")
 
-
-async def _run_external_compiler(ctx, prefix, compiler, cwd, label):
-    _, _, content = ctx.message.content.partition(prefix)
+@bot.command(name="comp5")
+async def comp5(ctx):
+    _, _, content = ctx.message.content.partition("c!comp5")
     content = extract_codeblock(content)
     content = await get_input_text(ctx, content)
     if not content:
-        await ctx.reply(f"❌ Cần assembly để compile {label}. VD: `{prefix} setlr` hoặc gửi file `.txt`")
+        await ctx.reply("❌ Cần assembly để compile 580. VD: `c!comp5 setlr` hoặc gửi file `.txt`")
         return
     content = strip_asm_comments(content)
     asm = content.strip()
     if not asm.startswith("org "):
         asm = "org 0xD730\n" + asm
     try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            [sys.executable, compiler, "-f", "hex"],
-            input=asm, capture_output=True, encoding="utf-8", errors="replace", timeout=30, cwd=cwd
+        result = subprocess.run(
+            [sys.executable, HD580_COMPILER, "-f", "hex"],
+            input=asm, capture_output=True, encoding="utf-8", errors="replace", timeout=30, cwd=HD580_DIR
         )
         if result.returncode != 0:
             raise Exception(result.stderr.strip().split("\n")[-1])
@@ -1266,18 +1121,32 @@ async def _run_external_compiler(ctx, prefix, compiler, cwd, label):
         hex_out = " ".join(lines[-1].split())
         await ctx.reply(f"```\n{hex_out}\n```")
     except Exception as e:
-        await ctx.reply(f"❌ Lỗi compile {label}:\n> `{e}`")
-
-
-@bot.command(name="comp5")
-async def comp5(ctx):
-    await _run_external_compiler(ctx, "c!comp5", HD580_COMPILER, HD580_DIR, "580")
-
+        await ctx.reply(f"❌ Lỗi compile 580:\n> `{e}`")
 
 @bot.command(name="comp8")
 async def comp8(ctx):
-    await _run_external_compiler(ctx, "c!comp8", HD880_COMPILER, HD880_DIR, "880")
-
+    _, _, content = ctx.message.content.partition("c!comp8")
+    content = extract_codeblock(content)
+    content = await get_input_text(ctx, content)
+    if not content:
+        await ctx.reply("❌ Cần assembly để compile 880. VD: `c!comp8 setlr` hoặc gửi file `.txt`")
+        return
+    content = strip_asm_comments(content)
+    asm = content.strip()
+    if not asm.startswith("org "):
+        asm = "org 0xD730\n" + asm
+    try:
+        result = subprocess.run(
+            [sys.executable, HD880_COMPILER, "-f", "hex"],
+            input=asm, capture_output=True, encoding="utf-8", errors="replace", timeout=30, cwd=HD880_DIR
+        )
+        if result.returncode != 0:
+            raise Exception(result.stderr.strip().split("\n")[-1])
+        lines = [l.strip() for l in result.stdout.split("\n") if l.strip()]
+        hex_out = " ".join(lines[-1].split())
+        await ctx.reply(f"```\n{hex_out}\n```")
+    except Exception as e:
+        await ctx.reply(f"❌ Lỗi compile 880:\n> `{e}`")
 
 @bot.command(name="help")
 async def help_cmd(ctx):
@@ -1291,10 +1160,9 @@ async def help_cmd(ctx):
     embed.add_field(name="⚡ CASIO Engine", value="`c!decomp <hex>` - Decompile hex → asm\n`c!comp <asm>` - Compile asm → hex (gadget)\n`c!comp5 <asm>` - Compile asm → hex (580)\n`c!comp8 <asm>` - Compile asm → hex (880)\n`c!transhex <hex>` - Dịch hex ra asm", inline=False)
     embed.add_field(name="🖼️ P2B & Hex Tools", value="`c!p2b` / `c!p` - P2B Pro: Ảnh ⇄ Bitmap Hex\n`c!dichhex <hex>` - Dịch hex → ảnh bitmap\n`c!ganhex <hex>` - Format hex đẹp, chuẩn Casio\n`c!h2i [WxH] <hex>` - Hex → Image (tuỳ size)\n`c!hexsplit <hex>` - Split hex thành dòng", inline=False)
     embed.add_field(name="🔧 API Keys", value="`c!api <key>` - Set API key hiện tại\n`c!addkey <key>` - Thêm API key mới\n`c!addkeyat <index> <key>` - Ghi đè key tại vị trí\n`c!keys` - Xem danh sách API key\n`c!model <model>` - Đổi model AI", inline=False)
-    embed.add_field(name="⚙️ Hệ thống", value="`c!reset` - Reset bộ nhớ hội thoại\n`c!restart` - Khởi động lại bot\n`c!file` - Quản lý file (list/view/write/append)\n`c!console <#kênh>` - Bật console debug\n`c!help` - Xem danh sách lệnh", inline=False)
+    embed.add_field(name="⚙️ Hệ thống", value="`c!reset` - Reset toàn bộ bot\n`c!restart` - Khởi động lại bot\n`c!file` - Quản lý file (list/view/delete)\n`c!console <#kênh>` - Bật console debug\n`c!help` - Xem danh sách lệnh", inline=False)
     embed.set_footer(text="Casio Đạo Trưởng · @Stacked · 24 lệnh | v2.0")
     await ctx.reply(embed=embed)
-
 
 @bot.command(name="leave")
 async def leave(ctx):
@@ -1304,7 +1172,6 @@ async def leave(ctx):
         joined_channels.remove(ctx.channel.id)
         save_joined_channels(joined_channels)
         await ctx.reply("👋 Đã rời kênh! Giờ chỉ trả lời khi được tag hoặc reply thôi.")
-
 
 @bot.command(name="dongmon")
 async def dongmon(ctx):
@@ -1318,7 +1185,6 @@ async def dongmon(ctx):
     bots = sum(1 for m in members if m.bot)
     humans = total - bots
     await ctx.reply(f"# Trong đây có {total} thằng đệ tử <:Daide_Putin:1483786083077455913>\n**{humans} Phàm nhân**\n**{bots} Bot đại đạo**")
-
 
 HOIDAP_DATA = {
     "spell": "**Spell**\nĐánh vần chữ. Có thể spell 1-5 line font thường và 6-8 line font nhỏ.",
@@ -1338,7 +1204,6 @@ HOIDAP_DATA = {
     "bangkitu": "__bangkitu__",
     "store": "**Store / Ghi giá trị**\nDùng `xr0 = addr, value, pad` + `[er0]=r2` ghi 1 byte.\nDùng `xr0 = addr, v_high, v_low` + `[er0]=er2` ghi 2 byte.\nVùng backup: dùng `adr_of [+4784] label`."
 }
-
 
 class HoiDapSelect(discord.ui.Select):
     def __init__(self):
@@ -1367,13 +1232,11 @@ class HoiDapSelect(discord.ui.Select):
         else:
             await interaction.response.send_message(val + "\n\n📚 Xem thêm `knowledge.txt` hoặc `c!learn`", ephemeral=True)
 
-
 @bot.command(name="hoidap")
 async def hoidap(ctx):
     view = discord.ui.View(timeout=120)
     view.add_item(HoiDapSelect())
     await ctx.reply("📌 **Chọn chủ đề:**", view=view)
-
 
 @bot.command(name="snipe")
 async def snipe(ctx):
@@ -1386,9 +1249,7 @@ async def snipe(ctx):
     time_str = discord.utils.format_dt(data["time"], style="R")
     await ctx.reply(f"**{data['author'].name}** đã xóa: {time_str}\n{content}{att}")
 
-
 @bot.command(name="console")
-@admin_only
 async def console(ctx, channel_id: str = None):
     global console_channel_id
     if not channel_id:
@@ -1399,7 +1260,7 @@ async def console(ctx, channel_id: str = None):
             await ctx.reply("Chưa set channel cho console chat. Dùng `c!console <channel_id>`")
         return
     try:
-        cid = int(channel_id.strip("<#>"))
+        cid = int(channel_id)
         ch = bot.get_channel(cid)
         if not ch:
             await ctx.reply("❌ Không tìm thấy channel với ID đó.")
@@ -1410,17 +1271,14 @@ async def console(ctx, channel_id: str = None):
     except ValueError:
         await ctx.reply("❌ ID channel không hợp lệ.")
 
-
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
-    if message.author.bot:
-        return
 
     is_joined_channel = message.channel.id in joined_channels
-    is_mentioned = bot.user.mentioned_in(message) and not message.mention_everyone
-    is_reply_to_bot = bool(
+    is_mentioned = bot.user.mentioned_in(message)
+    is_reply_to_bot = (
         message.reference
         and isinstance(message.reference.resolved, discord.Message)
         and message.reference.resolved.author == bot.user
@@ -1457,23 +1315,19 @@ async def on_message(message):
         elif isinstance(result, dict):
             f = result.get("file")
             e = result.get("embed")
-            xf = result.get("extra_files", [])
-            all_f = ([f] if f else []) + xf
-            await message.reply(files=all_f, embed=e)
+            await message.reply(file=f, embed=e)
         elif isinstance(result, discord.Embed):
             await message.reply(embed=result)
         return
 
     file_match = re.search(r'`([^`]+\.txt)`|(?:xem|đọc|nội dung|file)\s+`?(\S+\.txt)`?', prompt, re.IGNORECASE)
     if file_match:
-        fname = os.path.basename(file_match.group(1) or file_match.group(2))
-        # chỉ cho đọc các file kiến thức, KHÔNG cho đọc file tuỳ ý
-        if fname in ("knowledge.txt", "knowledge_learned.txt", "persona.txt"):
-            fpath = os.path.join(BASE_DIR, fname)
-            if os.path.isfile(fpath):
-                fcontent = load_file(fpath)
-                if fcontent:
-                    prompt += f"\n\nNội dung file {fname}:\n```\n{fcontent[:4000]}\n```"
+        fname = file_match.group(1) or file_match.group(2)
+        fpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), fname)
+        if os.path.isfile(fpath):
+            fcontent = load_file(fpath)
+            if fcontent:
+                prompt += f"\n\nNội dung file {fname}:\n```\n{fcontent[:4000]}\n```"
 
     # Read attached .txt files for AI context
     if message.attachments:
@@ -1494,31 +1348,38 @@ async def on_message(message):
     async with message.channel.typing():
         try:
             cid = message.channel.id
-            history = conversation_memory.setdefault(cid, [])
+            if cid not in conversation_memory:
+                conversation_memory[cid] = []
 
-            messages = (
-                [{"role": "system", "content": get_system_prompt()}]
-                + history
-                + [{"role": "user", "content": prompt}]
+            contents = conversation_memory[cid] + [
+                types.Content(role="user", parts=[types.Part(text=prompt)])
+            ]
+
+            response = await call_gemini(
+                model=MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=get_system_prompt()
+                )
             )
 
-            raw = await call_ai(messages)
-            reply_text = fix_emoji(raw, message.guild)
-            if not reply_text.strip():
-                reply_text = "..."
+            reply_text = fix_emoji(response.text, message.guild)
 
-            history.append({"role": "user", "content": prompt})
-            history.append({"role": "assistant", "content": reply_text})
-            if len(history) > MAX_MEMORY:
-                conversation_memory[cid] = history[-MAX_MEMORY:]
+            conversation_memory[cid].append(
+                types.Content(role="user", parts=[types.Part(text=prompt)])
+            )
+            conversation_memory[cid].append(
+                types.Content(role="model", parts=[types.Part(text=reply_text)])
+            )
+            if len(conversation_memory[cid]) > MAX_MEMORY:
+                conversation_memory[cid] = conversation_memory[cid][-MAX_MEMORY:]
 
             chunks = split_message(reply_text)
             try:
-                if message.guild:
-                    dao_phu = discord.utils.get(message.guild.emojis, name='dao_phu')
-                    if dao_phu:
-                        await message.add_reaction(dao_phu)
-            except Exception:
+                dao_phu = discord.utils.get(message.guild.emojis, name='dao_phu')
+                if dao_phu:
+                    await message.add_reaction(dao_phu)
+            except:
                 pass
             for i, chunk in enumerate(chunks):
                 if i == 0:
@@ -1532,12 +1393,12 @@ async def on_message(message):
             if "does not support image" in err_str.lower() or "image input" in err_str.lower():
                 await message.reply("⚠️ Model này không hỗ trợ ảnh. Vui lòng chỉ gửi tin nhắn chữ!")
             else:
-                await message.reply("⚠️ Lỗi gọi AI (hết key hoặc server lỗi), thử lại sau nhé!")
+                await message.reply("⚠️ Hết API key rồi, thử lại sau nhé!")
 
+    await bot.process_commands(message)
 
 # ================= P2B: Ảnh → Bitmap System =================
 p2b_sessions = {}
-
 
 def pil_to_bitmap(img, threshold=128, invert=False):
     arr = np.array(img.convert("L"), dtype=np.uint8)
@@ -1545,7 +1406,6 @@ def pil_to_bitmap(img, threshold=128, invert=False):
     if invert:
         bits = 1 - bits
     return bits
-
 
 def bitmap_to_hex_bytes(bits):
     h, w = bits.shape
@@ -1559,7 +1419,6 @@ def bitmap_to_hex_bytes(bits):
             out.append(f"{byte:02x}")
     return " ".join(out)
 
-
 def _get_thumb_size(s):
     iw, ih = s["original"].size
     cw, ch = s["canvas_w"], s["canvas_h"]
@@ -1569,16 +1428,18 @@ def _get_thumb_size(s):
         ih = int(ih * ratio)
     return iw, ih
 
-
 def bitmap_to_preview(bits, scale=4):
     h, w = bits.shape
     total_w = w * scale
     total_h = h * scale
-    # phóng to bằng numpy cho nhanh thay vì vòng lặp từng pixel
-    big = np.kron(bits, np.ones((scale, scale), dtype=np.uint8))
-    arr = np.where(big[..., None] > 0, 0, 255).astype(np.uint8)
-    arr = np.repeat(arr, 3, axis=2)
-    img = Image.fromarray(arr, "RGB")
+    img = Image.new("RGB", (total_w, total_h), (255, 255, 255))
+    px = img.load()
+    for y in range(h):
+        for x in range(w):
+            c = (0, 0, 0) if bits[y, x] else (255, 255, 255)
+            for dy in range(scale):
+                for dx in range(scale):
+                    px[x * scale + dx, y * scale + dy] = c
     draw = ImageDraw.Draw(img)
     draw.rectangle([0, 0, total_w - 1, total_h - 1], outline="red", width=2)
     buf = BytesIO()
@@ -1586,17 +1447,16 @@ def bitmap_to_preview(bits, scale=4):
     buf.seek(0)
     return buf
 
-
 def apply_adjustments(img, adj):
     img = img.copy()
     for a in adj:
         t = a["type"]
         if t == "brightness":
             v = a["val"] / 150.0
-            img = ImageEnhance.Brightness(img).enhance(max(0.0, 1.0 + v))
+            img = ImageEnhance.Brightness(img).enhance(1.0 + v)
         elif t == "contrast":
             v = a["val"] / 150.0
-            img = ImageEnhance.Contrast(img).enhance(max(0.0, 1.0 + v))
+            img = ImageEnhance.Contrast(img).enhance(1.0 + v)
         elif t == "exposure":
             ev = a["val"]
             img = ImageEnhance.Brightness(img).enhance(2.0 ** ev)
@@ -1605,7 +1465,7 @@ def apply_adjustments(img, adj):
             arr = np.array(img.convert("L"), dtype=np.float32)
             arr = (arr - black) / max(white - black, 1)
             arr = np.clip(arr, 0, 1)
-            if gamma != 1.0 and gamma > 0:
+            if gamma != 1.0:
                 arr = arr ** (1.0 / gamma)
             arr = (arr * 255).astype(np.uint8)
             img = Image.fromarray(arr, "L").convert("RGB")
@@ -1618,7 +1478,7 @@ def apply_adjustments(img, adj):
             img = Image.fromarray(np.clip(arr + diff * v, 0, 255).astype(np.uint8))
         elif t == "nr":
             k = max(1, int(a["val"] / 10))
-            img = img.filter(ImageFilter.MedianFilter(min(k * 2 + 1, 9)))
+            img = img.filter(ImageFilter.MedianFilter(k * 2 + 1))
         elif t == "grain":
             v = a["val"] / 100.0
             arr = np.array(img, dtype=np.float32)
@@ -1647,22 +1507,13 @@ def apply_adjustments(img, adj):
         elif t == "motionblur":
             r = max(1, a["val"])
             ang = a.get("angle", 0)
-            n = r * 2 + 1
             if ang % 180 < 45 or ang % 180 > 135:
-                kern = np.ones((n, 1), dtype=np.float32)  # blur ngang
-                arr = np.array(img, dtype=np.float32)
-                out = np.zeros_like(arr)
-                for dx in range(-r, r + 1):
-                    out += np.roll(arr, dx, axis=1)
-                img = Image.fromarray(np.clip(out / n, 0, 255).astype(np.uint8))
+                kern = (1, r * 2 + 1)
             else:
-                arr = np.array(img, dtype=np.float32)
-                out = np.zeros_like(arr)
-                for dy in range(-r, r + 1):
-                    out += np.roll(arr, dy, axis=0)
-                img = Image.fromarray(np.clip(out / n, 0, 255).astype(np.uint8))
+                kern = (r * 2 + 1, 1)
+            img = img.filter(ImageFilter.Kernel(kern, [1] * (kern[0] * kern[1])))
         elif t == "posterize":
-            bits_val = max(1, min(8, a["val"]))  # PIL chỉ nhận 1-8 bit
+            bits_val = max(2, min(20, a["val"]))
             img = ImageOps.posterize(img.convert("RGB"), bits_val)
         elif t == "equalize":
             img = ImageOps.equalize(img.convert("L")).convert("RGB")
@@ -1673,11 +1524,10 @@ def apply_adjustments(img, adj):
             tile = 8
             for ty in range(0, h, tile):
                 for tx in range(0, w, tile):
-                    tile_arr = arr[ty:min(ty + tile, h), tx:min(tx + tile, w)]
+                    tile_arr = arr[ty:min(ty+tile,h), tx:min(tx+tile,w)]
                     hist, _ = np.histogram(tile_arr, 256, (0, 256))
-                    hist = hist.astype(np.float32)
-                    clip_limit = clip * (tile * tile) / 256
-                    excess = max(0.0, float(hist.sum() - clip_limit * 256))
+                    clip_limit = clip * (tile*tile) / 256
+                    excess = max(0, hist.sum() - clip_limit * 256)
                     hist = np.minimum(hist, clip_limit)
                     hist += excess / 256
                     cdf = hist.cumsum()
@@ -1686,9 +1536,16 @@ def apply_adjustments(img, adj):
             img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).convert("RGB")
     return img
 
-
 def apply_dither(arr, mode):
     h, w = arr.shape
+    if mode == 2:
+        out = (arr > 0.5).astype(np.float32)
+    elif mode == 4:
+        out = np.floor(arr * 4) / 3
+    elif mode == 8:
+        out = np.floor(arr * 8) / 7
+    else:
+        return (arr > 0.5).astype(np.float32)
     bayer2 = np.array([[0, 2], [3, 1]]) / 4
     bayer4 = np.kron(bayer2 * 4, bayer2)
     bayer8 = np.kron(bayer4 * 4, bayer2)
@@ -1696,13 +1553,10 @@ def apply_dither(arr, mode):
         bayer = bayer2
     elif mode == 4:
         bayer = bayer4
-    elif mode == 8:
-        bayer = bayer8
     else:
-        return (arr > 0.5).astype(np.float32)
+        bayer = bayer8
     bayer = np.tile(bayer, (h // bayer.shape[0] + 1, w // bayer.shape[1] + 1))[:h, :w]
     return (arr > bayer).astype(np.float32)
-
 
 def remove_bg_grabcut(img):
     try:
@@ -1720,12 +1574,11 @@ def remove_bg_grabcut(img):
     except ImportError:
         return img
 
-
 def build_p2b_embed(s, bits):
     total = s["canvas_w"] * s["canvas_h"]
     on_px = int(bits.sum())
     adj_list = s["adjustments"]
-    adj_str = ", ".join(f"{a['type']}={a.get('val', '')}" for a in adj_list) if adj_list else "*none*"
+    adj_str = ", ".join(f"{a['type']}={a.get('val','')}" for a in adj_list) if adj_list else "*none*"
     dt = s.get("dither", 0)
     embed = discord.Embed(title="🖼️ P2B Bitmap", color=0x5865f2)
     embed.add_field(name="📐 Canvas", value=f"{s['canvas_w']}×{s['canvas_h']}", inline=True)
@@ -1734,11 +1587,10 @@ def build_p2b_embed(s, bits):
     embed.add_field(name="⚙️ Threshold", value=str(s['threshold']), inline=True)
     embed.add_field(name="🔄 Invert", value="✅" if s['invert'] else "❌", inline=True)
     embed.add_field(name="🎲 Dither", value=str(dt) if dt > 0 else "❌", inline=True)
-    embed.add_field(name="🔲 Pixels bật", value=f"{on_px}/{total} ({on_px * 100 // max(total, 1)}%)", inline=False)
-    embed.add_field(name="🎨 Adjustments", value=adj_str[:1000], inline=False)
+    embed.add_field(name="🔲 Pixels bật", value=f"{on_px}/{total} ({on_px*100//total}%)", inline=False)
+    embed.add_field(name="🎨 Adjustments", value=adj_str, inline=False)
     embed.set_footer(text=f"UID: {id(s)} | Gõ help để xem lệnh, exit để thoát")
     return embed
-
 
 def build_p2b_xong_embed(bits, w, h):
     hex_out = bitmap_to_hex_bytes(bits)
@@ -1746,12 +1598,11 @@ def build_p2b_xong_embed(bits, w, h):
     on_px = int(bits.sum())
     embed = discord.Embed(title="✅ P2B Done!", color=0x57f287)
     embed.add_field(name="📐 Canvas", value=f"{w}×{h}", inline=True)
-    embed.add_field(name="🔲 Pixels bật", value=f"{on_px}/{total} ({on_px * 100 // max(total, 1)}%)", inline=True)
-    embed.add_field(name="📝 Hex", value=f"```\n{hex_out[:1000]}\n```", inline=False)
-    if len(hex_out) > 1000:
-        embed.add_field(name="📎 Tiếp theo", value=f"Còn {len(hex_out) - 1000} ký tự hex nữa (xem file đính kèm)", inline=False)
+    embed.add_field(name="🔲 Pixels bật", value=f"{on_px}/{total} ({on_px*100//total}%)", inline=True)
+    embed.add_field(name="📝 Hex", value=f"```\n{hex_out[:1024]}\n```" if len(hex_out) > 1024 else f"```\n{hex_out}\n```", inline=False)
+    if len(hex_out) > 1024:
+        embed.add_field(name="📎 Tiếp theo", value=f"Còn {len(hex_out)-1024} ký tự hex nữa", inline=False)
     return embed
-
 
 def process_p2b(s):
     img = s["original"].copy()
@@ -1778,44 +1629,16 @@ def process_p2b(s):
     s["processed_image"] = img
     return bits
 
-
 def build_p2b_help():
     embed = discord.Embed(title="📖 P2B Pro - Image ⇄ Bitmap Hex", color=0x5865f2)
     embed.add_field(name="🌐 Web Tool (khuyên dùng)", value="Mở file `picture to bitmap/index.html` trong browser:\n• Ảnh → Hex: kéo thả ảnh, chỉnh threshold/invert/filters, xuất hex\n• Hex → Ảnh: dán hex space-separated, xem preview bitmap\n• Auto-detect: Ctrl+V tự nhận diện ảnh hay hex\n• Tích hợp slider, zoom, xuất file .h", inline=False)
     embed.add_field(name="📍 Vị trí", value="`move <x> <y>` · `center` · `topleft` · `topright` · `bottomleft` · `bottomright`\n`size <WxH>`", inline=False)
     embed.add_field(name="🎨 Adjustments", value="`brightness <-150~150>` · `contrast <-150~150>`\n`exposure <-5.0~5.0>`\n`levels <black> <white> [gamma]`\n`clarity <-100~100>` · `nr <0-100>` · `grain <0-100>`", inline=False)
-    embed.add_field(name="🔧 Filters", value="`smartsharpen <amt> [radius]` · `fieldblur <1-50>`\n`motionblur <1-50> [angle]` · `highpass <1-100>`\n`emboss` · `posterize <1-8>` · `equalize`\n`clahe <1.0-10.0>` · `removebg`", inline=False)
+    embed.add_field(name="🔧 Filters", value="`smartsharpen <amt> [radius]` · `fieldblur <1-50>`\n`motionblur <1-50> [angle]` · `highpass <1-100>`\n`emboss` · `posterize <2-20>` · `equalize`\n`clahe <1.0-10.0>` · `removebg`", inline=False)
     embed.add_field(name="⚙️ Khác", value="`threshold <0-255>` · `invert` · `dither <2/4/8>`\n`reset` · `xong` · `exit`\n\n💡 **Hex → Ảnh trên chat:** gửi hex kèm `c!p2b` để auto decode", inline=False)
     return embed
 
-
 SIZE_RE = re.compile(r'^size\s+(\d+)x(\d+)$', re.IGNORECASE)
-
-
-def _new_p2b_session(pil_img):
-    return {
-        "original": pil_img.copy(),
-        "img": pil_img,
-        "canvas_w": 192, "canvas_h": 63,
-        "pos_x": 0, "pos_y": 0,
-        "threshold": 128, "invert": False,
-        "adjustments": [],
-        "dither": 0,
-        "bits": None,
-        "processed_image": None,
-        "msg_id": None,
-    }
-
-
-class P2BTutorialButton(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=120)
-
-    @discord.ui.button(label="📖 Hướng dẫn P2B", style=discord.ButtonStyle.secondary)
-    async def tutorial(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = build_p2b_help()
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 @bot.command(name="p2b")
 async def p2b(ctx):
@@ -1823,7 +1646,7 @@ async def p2b(ctx):
     if not ctx.message.attachments:
         if uid in p2b_sessions:
             del p2b_sessions[uid]
-        await ctx.reply("📷 Gửi ảnh kèm theo `c!p2b` để convert bitmap.", embed=build_p2b_help())
+        await ctx.reply("📷 Gửi ảnh kèm theo `c!p2b` để convert bitmap.\n" + build_p2b_help())
         return
     att = ctx.message.attachments[0]
     if not att.filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
@@ -1835,7 +1658,18 @@ async def p2b(ctx):
     except Exception:
         await ctx.reply("❌ Không đọc được ảnh.")
         return
-    s = _new_p2b_session(pil_img)
+    s = {
+        "original": pil_img.copy(),
+        "img": pil_img,
+        "canvas_w": 192, "canvas_h": 63,
+        "pos_x": 0, "pos_y": 0,
+        "threshold": 128, "invert": False,
+        "adjustments": [],
+        "dither": 0,
+        "bits": None,
+        "processed_image": None,
+        "msg_id": None,
+    }
     p2b_sessions[uid] = s
     bits = process_p2b(s)
     embed = build_p2b_embed(s, bits)
@@ -1846,6 +1680,14 @@ async def p2b(ctx):
     msg = await ctx.reply(file=file, embed=embed, view=view)
     s["msg_id"] = msg.id
 
+class P2BTutorialButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=120)
+
+    @discord.ui.button(label="📖 Hướng dẫn P2B", style=discord.ButtonStyle.secondary)
+    async def tutorial(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = build_p2b_help()
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.command(name="p")
 async def p(ctx):
@@ -1869,7 +1711,7 @@ async def p(ctx):
         except Exception:
             await ctx.reply("❌ Không đọc được ảnh.")
             return
-        p2b_sessions[uid] = _new_p2b_session(pil_img)
+        p2b_sessions[uid] = {"original": pil_img.copy(), "img": pil_img, "canvas_w": 192, "canvas_h": 63, "pos_x": 0, "pos_y": 0, "threshold": 128, "invert": False, "adjustments": [], "dither": 0, "bits": None, "processed_image": None, "msg_id": None}
         bits = process_p2b(p2b_sessions[uid])
         embed = build_p2b_embed(p2b_sessions[uid], bits)
         preview = bitmap_to_preview(bits)
@@ -1889,19 +1731,13 @@ async def p(ctx):
             f = result.get("file")
             e = result.get("embed")
             xf = result.get("extra_files", [])
-            all_f = ([f] if f else []) + xf
+            all_f = [f] + xf if f else xf
             await ctx.reply(files=all_f, embed=e)
         elif isinstance(result, discord.Embed):
             await ctx.reply(embed=result)
         return
 
     await ctx.reply("❌ Bạn chưa có session P2B. Gửi ảnh kèm `c!p` để bắt đầu.", view=P2BTutorialButton())
-
-
-def _set_adj(s, adj_type, **kw):
-    s["adjustments"] = [a for a in s["adjustments"] if a["type"] != adj_type]
-    s["adjustments"].append({"type": adj_type, **kw})
-
 
 def handle_p2b_command(uid, text):
     s = p2b_sessions.get(uid)
@@ -1918,141 +1754,174 @@ def handle_p2b_command(uid, text):
         return build_p2b_help()
 
     changed = False
-    try:
-        if cmd == "move" and len(parts) >= 3:
+    if cmd == "move" and len(parts) >= 3:
+        try:
             s["pos_x"] = max(0, int(parts[1]))
             s["pos_y"] = max(0, int(parts[2]))
             changed = True
-        elif cmd == "center":
-            cw, ch = s["canvas_w"], s["canvas_h"]
-            iw, ih = _get_thumb_size(s)
-            s["pos_x"] = max(0, (cw - iw) // 2)
-            s["pos_y"] = max(0, (ch - ih) // 2)
+        except: pass
+    elif cmd == "center":
+        cw, ch = s["canvas_w"], s["canvas_h"]
+        iw, ih = _get_thumb_size(s)
+        s["pos_x"] = max(0, (cw - iw) // 2)
+        s["pos_y"] = max(0, (ch - ih) // 2)
+        changed = True
+    elif cmd in ("topleft",):
+        s["pos_x"] = s["pos_y"] = 0; changed = True
+    elif cmd == "topright":
+        cw = s["canvas_w"]
+        iw, ih = _get_thumb_size(s)
+        s["pos_x"] = max(0, cw - iw); s["pos_y"] = 0; changed = True
+    elif cmd == "bottomleft":
+        ch = s["canvas_h"]
+        iw, ih = _get_thumb_size(s)
+        s["pos_x"] = 0; s["pos_y"] = max(0, ch - ih); changed = True
+    elif cmd == "bottomright":
+        cw, ch = s["canvas_w"], s["canvas_h"]
+        iw, ih = _get_thumb_size(s)
+        s["pos_x"] = max(0, cw - iw); s["pos_y"] = max(0, ch - ih); changed = True
+    elif cmd == "size" and len(parts) >= 2:
+        m = SIZE_RE.match(text_stripped)
+        if m:
+            s["canvas_w"] = max(1, min(500, int(m.group(1))))
+            s["canvas_h"] = max(1, min(500, int(m.group(2))))
             changed = True
-        elif cmd == "topleft":
-            s["pos_x"] = s["pos_y"] = 0
-            changed = True
-        elif cmd == "topright":
-            cw = s["canvas_w"]
-            iw, ih = _get_thumb_size(s)
-            s["pos_x"] = max(0, cw - iw)
-            s["pos_y"] = 0
-            changed = True
-        elif cmd == "bottomleft":
-            ch = s["canvas_h"]
-            iw, ih = _get_thumb_size(s)
-            s["pos_x"] = 0
-            s["pos_y"] = max(0, ch - ih)
-            changed = True
-        elif cmd == "bottomright":
-            cw, ch = s["canvas_w"], s["canvas_h"]
-            iw, ih = _get_thumb_size(s)
-            s["pos_x"] = max(0, cw - iw)
-            s["pos_y"] = max(0, ch - ih)
-            changed = True
-        elif cmd == "size" and len(parts) >= 2:
-            m = SIZE_RE.match(text_stripped)
-            if m:
-                s["canvas_w"] = max(1, min(500, int(m.group(1))))
-                s["canvas_h"] = max(1, min(500, int(m.group(2))))
-                changed = True
-            else:
-                return "❌ Sai cú pháp! Dùng `size <rộng>x<cao>` (vd: `size 192x63`)"
-        elif cmd == "threshold" and len(parts) >= 2:
+        else:
+            return "❌ Sai cú pháp! Dùng `size <rộng>x<cao>` (vd: `size 192x63`)"
+    elif cmd == "threshold" and len(parts) >= 2:
+        try:
             s["threshold"] = max(0, min(255, int(parts[1])))
             changed = True
-        elif cmd == "invert":
-            s["invert"] = not s["invert"]
-            changed = True
-        elif cmd == "dither" and len(parts) >= 2:
+        except: pass
+    elif cmd == "invert":
+        s["invert"] = not s["invert"]; changed = True
+    elif cmd == "dither" and len(parts) >= 2:
+        try:
             v = int(parts[1])
-            s["dither"] = v if v in (2, 4, 8) else 0
-            changed = True
-        elif cmd == "brightness" and len(parts) >= 2:
-            _set_adj(s, "brightness", val=max(-150, min(150, int(parts[1]))))
-            changed = True
-        elif cmd == "contrast" and len(parts) >= 2:
-            _set_adj(s, "contrast", val=max(-150, min(150, int(parts[1]))))
-            changed = True
-        elif cmd == "exposure" and len(parts) >= 2:
-            _set_adj(s, "exposure", val=max(-5.0, min(5.0, float(parts[1]))))
-            changed = True
-        elif cmd == "levels" and len(parts) >= 3:
+            s["dither"] = v if v in (2, 4, 8) else 0; changed = True
+        except: pass
+    elif cmd == "brightness" and len(parts) >= 2:
+        try:
+            v = max(-150, min(150, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "brightness"]
+            s["adjustments"].append({"type": "brightness", "val": v}); changed = True
+        except: pass
+    elif cmd == "contrast" and len(parts) >= 2:
+        try:
+            v = max(-150, min(150, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "contrast"]
+            s["adjustments"].append({"type": "contrast", "val": v}); changed = True
+        except: pass
+    elif cmd == "exposure" and len(parts) >= 2:
+        try:
+            v = max(-5.0, min(5.0, float(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "exposure"]
+            s["adjustments"].append({"type": "exposure", "val": v}); changed = True
+        except: pass
+    elif cmd == "levels" and len(parts) >= 3:
+        try:
             blk = max(0, min(255, int(parts[1])))
             wht = max(0, min(255, int(parts[2])))
             gam = float(parts[3]) if len(parts) >= 4 else 1.0
-            _set_adj(s, "levels", black=blk, white=wht, gamma=gam)
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "levels"]
+            s["adjustments"].append({"type": "levels", "black": blk, "white": wht, "gamma": gam})
             changed = True
-        elif cmd == "clarity" and len(parts) >= 2:
-            _set_adj(s, "clarity", val=max(-100, min(100, int(parts[1]))))
-            changed = True
-        elif cmd == "nr" and len(parts) >= 2:
-            _set_adj(s, "nr", val=max(0, min(100, int(parts[1]))))
-            changed = True
-        elif cmd == "grain" and len(parts) >= 2:
-            _set_adj(s, "grain", val=max(0, min(100, int(parts[1]))))
-            changed = True
-        elif cmd == "smartsharpen" and len(parts) >= 2:
+        except: pass
+    elif cmd == "clarity" and len(parts) >= 2:
+        try:
+            v = max(-100, min(100, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "clarity"]
+            s["adjustments"].append({"type": "clarity", "val": v}); changed = True
+        except: pass
+    elif cmd == "nr" and len(parts) >= 2:
+        try:
+            v = max(0, min(100, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "nr"]
+            s["adjustments"].append({"type": "nr", "val": v}); changed = True
+        except: pass
+    elif cmd == "grain" and len(parts) >= 2:
+        try:
+            v = max(0, min(100, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "grain"]
+            s["adjustments"].append({"type": "grain", "val": v}); changed = True
+        except: pass
+    elif cmd == "smartsharpen" and len(parts) >= 2:
+        try:
             amt = max(0, min(1000, int(parts[1])))
             rad = int(parts[2]) if len(parts) >= 3 else 1
-            _set_adj(s, "smartsharpen", amt=amt, radius=rad)
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "smartsharpen"]
+            s["adjustments"].append({"type": "smartsharpen", "amt": amt, "radius": rad})
             changed = True
-        elif cmd == "fieldblur" and len(parts) >= 2:
-            _set_adj(s, "fieldblur", val=max(1, min(50, int(parts[1]))))
-            changed = True
-        elif cmd == "motionblur" and len(parts) >= 2:
+        except: pass
+    elif cmd == "fieldblur" and len(parts) >= 2:
+        try:
+            v = max(1, min(50, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "fieldblur"]
+            s["adjustments"].append({"type": "fieldblur", "val": v}); changed = True
+        except: pass
+    elif cmd == "motionblur" and len(parts) >= 2:
+        try:
             v = max(1, min(50, int(parts[1])))
             ang = float(parts[2]) if len(parts) >= 3 else 0
-            _set_adj(s, "motionblur", val=v, angle=ang)
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "motionblur"]
+            s["adjustments"].append({"type": "motionblur", "val": v, "angle": ang})
             changed = True
-        elif cmd == "highpass" and len(parts) >= 2:
-            _set_adj(s, "highpass", val=max(1, min(100, int(parts[1]))))
-            changed = True
-        elif cmd == "emboss":
-            if any(a["type"] == "emboss" for a in s["adjustments"]):
-                s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "emboss"]
-            else:
-                s["adjustments"].append({"type": "emboss"})
-            changed = True
-        elif cmd == "posterize" and len(parts) >= 2:
-            _set_adj(s, "posterize", val=max(1, min(8, int(parts[1]))))
-            changed = True
-        elif cmd == "equalize":
-            if any(a["type"] == "equalize" for a in s["adjustments"]):
-                s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "equalize"]
-            else:
-                s["adjustments"].append({"type": "equalize"})
-            changed = True
-        elif cmd == "clahe" and len(parts) >= 2:
-            _set_adj(s, "clahe", val=max(1.0, min(10.0, float(parts[1]))))
-            changed = True
-        elif cmd == "removebg":
-            if "original_backup" not in s:
-                s["original_backup"] = s["original"].copy()
-            s["original"] = remove_bg_grabcut(s["original"])
-            changed = True
-        elif cmd == "reset":
-            s["adjustments"] = []
-            s["dither"] = 0
-            s["threshold"] = 128
-            s["invert"] = False
-            s["pos_x"] = s["pos_y"] = 0
-            s["canvas_w"] = 192
-            s["canvas_h"] = 63
-            if "original_backup" in s:
-                s["original"] = s["original_backup"]
-            changed = True
-        elif cmd == "xong":
-            bits = process_p2b(s)
-            embed = build_p2b_xong_embed(bits, s["canvas_w"], s["canvas_h"])
-            file = discord.File(bitmap_to_preview(bits), "preview.png")
-            embed.set_image(url="attachment://preview.png")
-            hex_str = bitmap_to_hex_bytes(bits)
-            hex_file = discord.File(BytesIO(hex_str.encode("utf-8")), "bitmap_hex.txt")
-            del p2b_sessions[uid]
-            return {"file": file, "embed": embed, "extra_files": [hex_file]}
-    except (ValueError, IndexError):
-        return "❌ Tham số không hợp lệ, gõ `help` để xem cú pháp."
+        except: pass
+    elif cmd == "highpass" and len(parts) >= 2:
+        try:
+            v = max(1, min(100, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "highpass"]
+            s["adjustments"].append({"type": "highpass", "val": v}); changed = True
+        except: pass
+    elif cmd == "emboss":
+        existing = any(a["type"] == "emboss" for a in s["adjustments"])
+        if existing:
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "emboss"]
+        else:
+            s["adjustments"].append({"type": "emboss"})
+        changed = True
+    elif cmd == "posterize" and len(parts) >= 2:
+        try:
+            v = max(2, min(20, int(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "posterize"]
+            s["adjustments"].append({"type": "posterize", "val": v}); changed = True
+        except: pass
+    elif cmd == "equalize":
+        existing = any(a["type"] == "equalize" for a in s["adjustments"])
+        if existing:
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "equalize"]
+        else:
+            s["adjustments"].append({"type": "equalize"})
+        changed = True
+    elif cmd == "clahe" and len(parts) >= 2:
+        try:
+            v = max(1.0, min(10.0, float(parts[1])))
+            s["adjustments"] = [a for a in s["adjustments"] if a["type"] != "clahe"]
+            s["adjustments"].append({"type": "clahe", "val": v}); changed = True
+        except: pass
+    elif cmd == "removebg":
+        if "original_backup" not in s:
+            s["original_backup"] = s["original"].copy()
+        s["original"] = remove_bg_grabcut(s["original"])
+        changed = True
+    elif cmd == "reset":
+        s["adjustments"] = []; s["dither"] = 0
+        s["threshold"] = 128; s["invert"] = False
+        s["pos_x"] = s["pos_y"] = 0
+        s["canvas_w"] = 192; s["canvas_h"] = 63
+        if "original_backup" in s:
+            s["original"] = s["original_backup"]
+        changed = True
+    elif cmd == "xong":
+        bits = process_p2b(s)
+        embed = build_p2b_xong_embed(bits, s["canvas_w"], s["canvas_h"])
+        file = discord.File(bitmap_to_preview(bits), "preview.png")
+        embed.set_image(url="attachment://preview.png")
+        hex_str = bitmap_to_hex_bytes(bits)
+        hex_bytes = hex_str.encode("utf-8")
+        hex_file = discord.File(BytesIO(hex_bytes), "bitmap_hex.txt")
+        del p2b_sessions[uid]
+        return {"file": file, "embed": embed, "extra_files": [hex_file]}
 
     if changed:
         bits = process_p2b(s)
@@ -2064,23 +1933,21 @@ def handle_p2b_command(uid, text):
 
     return None
 
-
 def hex_to_image(hex_str, width, height):
     hex_str = hex_str.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
     img_data = []
     for i in range(0, len(hex_str), 2):
-        byte = int(hex_str[i:i + 2], 16)
+        byte = int(hex_str[i:i+2], 16)
         for bit in range(7, -1, -1):
-            img_data.append(0 if (byte >> bit) & 1 else 255)  # bit 1 = pixel đen, khớp với P2B
+            img_data.append(255 if (byte >> bit) & 1 else 0)
     while len(img_data) < width * height:
-        img_data.append(255)
+        img_data.append(0)
     img = Image.new('L', (width, height))
-    img.putdata(img_data[:width * height])
+    img.putdata(img_data[:width*height])
     buf = BytesIO()
     img.save(buf, "PNG")
     buf.seek(0)
     return buf
-
 
 async def get_input_text(ctx, inline_text):
     if inline_text:
@@ -2092,7 +1959,6 @@ async def get_input_text(ctx, inline_text):
         data = await att.read()
         return data.decode("utf-8", errors="replace")
     return None
-
 
 @bot.command(name="h2i")
 async def h2i(ctx, *, args=None):
@@ -2111,6 +1977,7 @@ async def h2i(ctx, *, args=None):
         await ctx.reply("❌ Cần hex data. VD: `c!h2i FF 00 AA` hoặc gửi file `.txt` kèm lệnh")
         return
     try:
+        hex_data = hex_data or ""
         hex_clean = hex_data.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
         if not hex_clean:
             await ctx.reply("❌ Ko có dữ liệu hex!")
@@ -2124,9 +1991,6 @@ async def h2i(ctx, *, args=None):
         if len(hex_clean) % 2 != 0:
             await ctx.reply("❌ Hex phải có độ dài chẵn!")
             return
-        if width < 1 or height < 1 or width * height > 2_000_000:
-            await ctx.reply("❌ Kích thước không hợp lệ!")
-            return
         buf = hex_to_image(hex_clean, width, height)
         file = discord.File(buf, "bitmap.png")
         embed = discord.Embed(title="🖼️ Hex → Image", color=0x5865f2)
@@ -2135,7 +1999,6 @@ async def h2i(ctx, *, args=None):
         await ctx.reply(file=file, embed=embed)
     except Exception as e:
         await ctx.reply(f"❌ Lỗi: {e}")
-
 
 @bot.command(name="hexsplit")
 async def hexsplit(ctx, *, hex_str=None):
@@ -2147,17 +2010,16 @@ async def hexsplit(ctx, *, hex_str=None):
     if not all(c in "0123456789abcdefABCDEF" for c in hex_str):
         await ctx.reply("❌ Hex ko hợp lệ!")
         return
-    bytes_list = [hex_str[i:i + 2] for i in range(0, len(hex_str) - 1, 2)]
+    bytes_list = [hex_str[i:i+2] for i in range(0, len(hex_str), 2)]
     lines = []
     for i in range(0, len(bytes_list), 16):
         addr = i
-        chunk = bytes_list[i:i + 16]
+        chunk = bytes_list[i:i+16]
         hex_part = " ".join(chunk)
         ascii_part = "".join(chr(int(b, 16)) if 32 <= int(b, 16) < 127 else "." for b in chunk)
         lines.append(f"{addr:04X}  {hex_part:<48} {ascii_part}")
     result = "\n".join(lines)
     await ctx.reply(f"```\n{result[:1900]}\n```" if len(result) > 1900 else f"```\n{result}\n```")
-
 
 @bot.command(name="transhex")
 async def transhex(ctx, *, hex_str=None):
@@ -2171,7 +2033,6 @@ async def transhex(ctx, *, hex_str=None):
     except Exception as e:
         await ctx.reply(f"❌ Lỗi dịch hex: {e}")
 
-
 @bot.command(name="dichhex")
 async def dichhex(ctx, *, hex_str=None):
     hex_str = await get_input_text(ctx, hex_str)
@@ -2180,13 +2041,15 @@ async def dichhex(ctx, *, hex_str=None):
         return
     try:
         hex_str = hex_str.replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
-        bytes_list = [int(hex_str[i:i + 2], 16) for i in range(0, len(hex_str) - 1, 2)]
+        bytes_list = [int(hex_str[i:i+2], 16) for i in range(0, len(hex_str), 2)]
         total_bits = len(bytes_list) * 8
         width = 192
         height = total_bits // width
         if height == 0 or total_bits % width != 0:
             height = len(bytes_list)
             width = 8
+        elif height > 200:
+            height = total_bits // 192
         buf = hex_to_image(hex_str, width, height)
         file = discord.File(buf, "bitmap.png")
         embed = discord.Embed(title="🖼️ Dịch Hex → Bitmap", color=0x5865f2)
@@ -2201,7 +2064,6 @@ async def dichhex(ctx, *, hex_str=None):
     except Exception as e:
         await ctx.reply(f"❌ Lỗi: {e}")
 
-
 @bot.command(name="ganhex")
 async def ganhex(ctx, *, hex_str=None):
     hex_str = await get_input_text(ctx, hex_str)
@@ -2212,17 +2074,16 @@ async def ganhex(ctx, *, hex_str=None):
     if not all(c in "0123456789abcdefABCDEF" for c in hex_str):
         await ctx.reply("❌ Hex ko hợp lệ! Chỉ gồm 0-9 A-F.")
         return
-    bytes_list = [hex_str[i:i + 2] for i in range(0, len(hex_str) - 1, 2)]
+    bytes_list = [hex_str[i:i+2] for i in range(0, len(hex_str), 2)]
     lines = []
     for i in range(0, len(bytes_list), 24):
-        chunk = bytes_list[i:i + 24]
+        chunk = bytes_list[i:i+24]
         lines.append(" ".join(chunk))
     result = "\n".join(lines)
     await ctx.reply(
         f"```\n{result[:1900]}\n```" if len(result) > 1900 else f"```\n{result}\n```",
-        file=discord.File(BytesIO(result.encode()), "hex_data.txt")
+        file=discord.File(result.encode(), "hex_data.txt")
     )
-
 
 # Auto-chat: thỉnh thoảng chat linh tinh ở kênh joined
 auto_chat_topics = [
@@ -2233,7 +2094,6 @@ auto_chat_topics = [
     "hỏi có ai cần giúp gì về CASIO ko",
     "nói mấy câu Gen Z láo láo về cuộc sống",
 ]
-
 
 @tasks.loop(hours=2)
 async def auto_chat_loop():
@@ -2246,25 +2106,19 @@ async def auto_chat_loop():
     topic = random.choice(auto_chat_topics)
     try:
         prompt = f"Hãy nói {topic}, chỉ 1-2 câu, phong cách Gen Z, láo láo tí, ko cần kiến thức CASIO. Có thể dùng emoji."
-        text = await call_ai(
-            [{"role": "system", "content": PERSONA}, {"role": "user", "content": prompt}],
-            max_retries=1
-        )
-        text = fix_emoji(text.strip(), ch.guild if hasattr(ch, 'guild') else None)
-        if text:
-            await ch.send(text)
-    except Exception as e:
-        print(f"[AutoChat] Lỗi: {e}")
-
+        resp = await call_gemini(model=MODEL, contents=prompt, max_retries=1)
+        text = fix_emoji(resp.text.strip(), ch.guild if hasattr(ch, 'guild') else None)
+        await ch.send(text)
+    except:
+        pass
 
 @auto_chat_loop.before_loop
 async def before_auto_chat():
     await bot.wait_until_ready()
 
-
 if __name__ == "__main__":
-    if not DISCORD_TOKEN or not API_KEY:
-        print("LỖI: Vui lòng kiểm tra lại cấu hình DISCORD_TOKEN và API_KEY trong file .env!")
+    if not DISCORD_TOKEN or not GEMINI_API_KEY:
+        print("LỖI: Vui lòng kiểm tra lại cấu hình DISCORD_TOKEN và GEMINI_API_KEY trong file .env!")
     elif not MODEL:
         print("LỖI: Vui lòng kiểm tra biến MODEL trong file .env!")
     else:
