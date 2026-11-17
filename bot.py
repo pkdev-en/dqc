@@ -34,6 +34,11 @@ load_dotenv(dotenv_path)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL = os.getenv("MODEL", "gemini-3.5-flash")
+# --- Nha cung cap AI thu 2 (OpenAI-compatible: OpenRouter, Cerebras, Groq, Cloudflare...) ---
+LLM_BASE_URL = (os.getenv("LLM_BASE_URL", "") or "").rstrip("/")   # vd https://openrouter.ai/api/v1
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "")
+LLM_PRIMARY = os.getenv("LLM_PRIMARY", "gemini").lower()           # "gemini" hoac "alt": cai nao duoc goi truoc
 KNOWLEDGE_FILE = os.getenv("KNOWLEDGE_FILE", "knowledge.txt")
 LEARNED_KNOWLEDGE_FILE = "knowledge_learned.txt"
 CHANNELS_FILE = "joined_channels.json"
@@ -171,16 +176,45 @@ def refresh_globals(filename):
     elif filename == "persona.txt":
         PERSONA = load_file(PERSONA_FILE)
 
-def get_full_knowledge():
+def _tokens(s):
+    return set(w for w in re.findall(r"[\w']+", s.lower()) if len(w) > 2)
+
+def retrieve_learned(query, max_chars=3000, max_chunks=6):
+    """Chi lay vai doan 'kien thuc hoc duoc' lien quan toi cau hoi, thay vi nhet ca file (~170KB) vao moi request."""
+    if not KNOWLEDGE_LEARNED:
+        return ""
+    q = _tokens(query)
+    if not q:
+        return ""
+    scored = []
+    for chunk in re.split(r"\n\s*\n", KNOWLEDGE_LEARNED):
+        chunk = chunk.strip()
+        if len(chunk) < 8:
+            continue
+        score = len(q & _tokens(chunk))
+        if score >= 2:
+            scored.append((score, chunk))
+    scored.sort(key=lambda x: -x[0])
+    out, total = [], 0
+    for _, chunk in scored[:max_chunks]:
+        if total + len(chunk) > max_chars:
+            break
+        out.append(chunk)
+        total += len(chunk)
+    return "\n\n".join(out)
+
+def get_full_knowledge(query=""):
     parts = []
     if KNOWLEDGE_BASE:
         parts.append(f"Kiến thức gốc:\n{KNOWLEDGE_BASE}")
-    if KNOWLEDGE_LEARNED:
-        parts.append(f"Kiến thức học được từ người dùng:\n{KNOWLEDGE_LEARNED}")
+    learned = retrieve_learned(query)
+    if learned:
+        parts.append(f"Kiến thức học được từ người dùng (liên quan câu hỏi):\n{learned}")
     return "\n\n".join(parts)
 
-def get_system_prompt():
-    knowledge = get_full_knowledge()
+def get_system_prompt(query=""):
+    # Phan tinh (persona + knowledge goc) dung truoc, phan dong (learned) dung sau -> Gemini cache prefix de hon
+    knowledge = get_full_knowledge(query)
     if knowledge:
         return PERSONA + "\n\n" + knowledge
     return PERSONA
@@ -261,7 +295,7 @@ genai_client = genai.Client(api_key=GEMINI_API_KEY)
 snipe_store = {}
 console_channel_id = None
 conversation_memory = {}
-MAX_MEMORY = 40
+MAX_MEMORY = 12  # was 40: fewer tokens per call
 api_exhausted_until = 0
 
 @bot.event
@@ -1271,6 +1305,90 @@ async def console(ctx, channel_id: str = None):
     except ValueError:
         await ctx.reply("❌ ID channel không hợp lệ.")
 
+
+# ================= AI asm: compile -> sua loi tu dong =================
+MAX_FIX_ROUNDS = 3
+ASM_BLOCK_RE = re.compile(r"```(?:asm|assembly)?[ \t]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+
+def find_asm_block(text):
+    """Tim code block giong assembly (tag asm/assembly, hoac co dong 'org ')."""
+    for m in ASM_BLOCK_RE.finditer(text):
+        body = m.group(1)
+        tag_is_asm = text[m.start():m.start()+12].lower().startswith(("```asm", "```assembly"))
+        if tag_is_asm or re.search(r"^\s*org\s", body, re.MULTILINE):
+            return body
+    return None
+
+def run_casio_compiler(asm, target="580"):
+    """Tra ve (ok, hex_hoac_loi). Dung dung compiler cua c!comp5 / c!comp8."""
+    compiler, cwd = (HD880_COMPILER, HD880_DIR) if target == "880" else (HD580_COMPILER, HD580_DIR)
+    asm = strip_asm_comments(asm).strip()
+    if not asm.startswith("org "):
+        asm = "org 0xD730\n" + asm
+    try:
+        r = subprocess.run([sys.executable, compiler, "-f", "hex"], input=asm,
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=30, cwd=cwd)
+    except Exception as e:
+        return False, str(e)
+    if r.returncode != 0:
+        return False, (r.stderr.strip().split("\n") or ["loi khong ro"])[-1]
+    lines = [l.strip() for l in r.stdout.split("\n") if l.strip()]
+    return True, " ".join(lines[-1].split()) if lines else ""
+
+async def call_alt_llm(contents, system_prompt):
+    """Goi nha cung cap OpenAI-compatible. Tra ve text."""
+    import aiohttp
+    msgs = [{"role": "system", "content": system_prompt}]
+    for c in contents:
+        text = "".join(getattr(p, "text", "") or "" for p in c.parts)
+        if text:
+            msgs.append({"role": "assistant" if c.role == "model" else "user", "content": text})
+    headers = {"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": LLM_MODEL, "messages": msgs}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as s:
+        async with s.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload) as r:
+            data = await r.json(content_type=None)
+            if r.status != 200:
+                raise Exception(f"ALT LLM {r.status}: {str(data)[:300]}")
+    return data["choices"][0]["message"]["content"] or ""
+
+async def call_llm(contents, system_prompt):
+    """Goi AI theo thu tu uu tien; loi/het quota thi thu nha cung cap con lai."""
+    alt_ok = bool(LLM_BASE_URL and LLM_API_KEY and LLM_MODEL)
+    order = ["alt", "gemini"] if (alt_ok and LLM_PRIMARY == "alt") else ["gemini"] + (["alt"] if alt_ok else [])
+    last_err = None
+    for which in order:
+        try:
+            if which == "alt":
+                return await call_alt_llm(contents, system_prompt)
+            resp = await call_gemini(model=MODEL, contents=contents,
+                                     config=types.GenerateContentConfig(system_instruction=system_prompt))
+            return resp.text or ""
+        except Exception as e:
+            print(f"[LLM] {which} loi: {e}")
+            last_err = e
+    raise last_err
+
+async def gemini_with_compile_fix(contents, system_prompt, user_prompt):
+    """Goi Gemini; neu tra loi co assembly thi compile thu, loi thi gui lai cho model sua (toi da MAX_FIX_ROUNDS lan)."""
+    target = "880" if "880" in user_prompt else "580"
+    text = await call_llm(contents, system_prompt)
+    for _ in range(MAX_FIX_ROUNDS):
+        asm = find_asm_block(text)
+        if asm is None:
+            return text
+        ok, info = await asyncio.to_thread(run_casio_compiler, asm, target)
+        if ok:
+            return text + f"\n\n✅ Compile OK ({target}):\n```\n{info[:1500]}\n```"
+        contents = contents + [
+            types.Content(role="model", parts=[types.Part(text=text)]),
+            types.Content(role="user", parts=[types.Part(text=(
+                f"[he thong] Compiler {target} bao loi: {info}\n"
+                "Hay sua assembly cho dung cu phap compiler nay va gui lai toan bo code trong 1 code block ```asm."))]),
+        ]
+        text = (await call_llm(contents, system_prompt)) or text
+    return text + "\n\n⚠️ Da thu sua " + str(MAX_FIX_ROUNDS) + " lan nhung compiler van bao loi, code tren co the chua dung."
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -1355,15 +1473,9 @@ async def on_message(message):
                 types.Content(role="user", parts=[types.Part(text=prompt)])
             ]
 
-            response = await call_gemini(
-                model=MODEL,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=get_system_prompt()
-                )
-            )
+            raw_text = await gemini_with_compile_fix(contents, get_system_prompt(prompt), prompt)
 
-            reply_text = fix_emoji(response.text, message.guild)
+            reply_text = fix_emoji(raw_text, message.guild)
 
             conversation_memory[cid].append(
                 types.Content(role="user", parts=[types.Part(text=prompt)])
